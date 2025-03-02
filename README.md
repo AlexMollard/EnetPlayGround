@@ -1,2 +1,137 @@
-# EnetPlayGround
-Just a place where im testing out some enet stuff.
+<div align="center">
+  <h1>🎮 EnetPlayGround</h1>
+  <p><strong>My personal networking sandbox where packets go to play!</strong></p>
+  
+  <p>
+    <a href="#features">Cool Stuff</a> •
+    <a href="#structure">The Blueprint</a> •
+    <a href="#setup">Get It Running</a> •
+    <a href="#usage">Play With It</a> •
+    <a href="#development">Break Things</a>
+  </p>
+  
+  <img src="https://img.shields.io/badge/language-C%2B%2B-blue.svg" alt="Language">
+  <img src="https://img.shields.io/badge/network-ENet-brightgreen.svg" alt="Network Library">
+  <img src="https://img.shields.io/badge/bugs-probably-red.svg" alt="Bug Status">
+  <img src="https://img.shields.io/badge/seriousness-not%20much-yellow.svg" alt="Seriousness Level">
+</div>
+
+---
+
+## 📋 About
+
+Welcome to my networking playground! This is where I throw code at the wall and see what sticks. EnetPlayGround is my personal laboratory for experimenting with the ENet reliable UDP networking library. Will it work? Maybe! Will it crash? Probably! Is it fun? I guess.
+
+I actually made this project because I have been playing alot of mmo's and wanted to see how difficult it would be to make a simple mmo game, because every programmer has heard how difficult they are to make. I have no idea what I am doing but I am having fun and learning alot.
+
+## ✨ Cool Stuff I'm Playing With
+
+<table>
+  <tr>
+    <td width="50%">
+      <h3>Server Magic ✨</h3>
+      <ul>
+        <li>Juggling multiple clients without dropping them</li>
+        <li>Events that sometimes fire when they should</li>
+        <li>Packets that (usually) arrive in one piece</li>
+        <li>Broadcast system that shouts at everyone</li>
+      </ul>
+    </td>
+    <td width="50%">
+      <h3>Client Shenanigans 🎭</h3>
+      <ul>
+        <li>Connection wizardry</li>
+        <li>Game state that occasionally syncs</li>
+        <li>Logging that tells me what went wrong</li>
+        <li>Network knobs to twiddle</li>
+      </ul>
+    </td>
+  </tr>
+</table>
+
+## 🏗️ The Grand Blueprint
+
+```
+EnetPlayGround/
+├── EnetServer/       # The boss who tells everyone what to do
+│   └── src/
+│       └── server.cpp   # Where the magic happens (or breaks)
+├── EnetClient/       # The minions who follow orders
+│   └── src/
+│       ├── Constants.h      # Numbers I might change someday
+│       ├── EnetClient.cpp   # Network stuff that sends things
+│       ├── GameClient.cpp   # Pretending this is a real game
+│       └── Logger.h         # For when things go boom
+```
+
+## 🛠️ Toys I'm Using
+
+### Libraries
+- **ENet**: The networking wizard that somehow makes UDP reliable (still unsure on how udp works tbh)
+- **Hello ImGui**: Because command lines are for boomers (jk yall made some cool stuff)
+
+### Package Management
+- **vcpkg**: So I don't have to figure out dependencies manually (thank goodness!)
+
+## 🚀 How to Join the Fun
+
+### What You'll Need
+- Visual Studio (the newer the better)
+- vcpkg (because manual dependency management is no fun)
+- A sense of adventure (and patience for debugging)
+
+### Getting Started
+
+1. Grab the code
+```bash
+git clone https://github.com/alexmollard/EnetPlayGround.git
+# Congratulations! You now have my mess on your computer!
+```
+
+2. Set up vcpkg (if you haven't already, dont be a bigot)
+```bash
+git clone https://github.com/Microsoft/vcpkg.git
+cd vcpkg
+bootstrap-vcpkg.bat
+vcpkg integrate install
+# Magic happening...
+```
+
+3. Get the goodies
+```bash
+vcpkg install enet
+vcpkg install hello-imgui
+# Now you can use the libraries in all visual studio projects without linker hell!
+```
+
+4. Fire up Visual Studio
+   - Open `EnetServer/EnetServer.sln` for server fun
+   - Open `EnetClient/EnetClient.sln` for client adventures
+   
+5. Hit Build and cross your fingers!
+   - Ctrl+Shift+B for the keyboard shortcut enthusiasts
+
+## 🎮 Let's Play!
+
+### Starting the Server
+1. Build it
+2. Run it
+3. Hope it doesn't crash
+
+### Launching Clients
+1. Build that too
+2. Run as many as your CPU can handle
+3. Watch them try to talk to each other
+4. Be amazed when it actually works
+
+## 🧪 Experiment Ideas
+- What happens if we send a million packets?
+- Can the server handle 100 clients? (Probably not, but let's try!)
+- How badly can we break the network and still recover?
+
+<div align="center">
+    <br>
+    <p><sub>Made with 🍕, and questionable code decisions</sub></p>
+    <p><sub>No networks were permanently harmed in the making of this project, I think, I hope, My internet has been playing up since</sub></p>
+    <img src="https://media1.tenor.com/m/aGA-AhVPXS0AAAAd/gato-enojado-insano-waza.gif" alt="cat" width="200px">
+</div>
