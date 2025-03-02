@@ -4,6 +4,7 @@
   
   <p>
     <a href="#-cool-stuff-im-playing-with">Cool Stuff</a> •
+    <a href="#-screenshots">Screenshots</a> •
     <a href="#-the-grand-blueprint">The Blueprint</a> •
     <a href="#-how-to-join-the-fun">Get It Running</a> •
     <a href="#-lets-play">Play With It</a> •
@@ -49,7 +50,22 @@ I actually made this project because I have been playing alot of mmo's and wante
   </tr>
 </table>
 
-<img src="docs/FirstWorkingChat.png" alt="first screenshot">
+## 📸 Screenshots
+
+<div align="center">
+  <table>
+    <tr>
+      <td width="50%">
+        <img src="docs/FirstServer.png" alt="Server Console" width="100%" style="border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
+        <p align="center"><i>Server console showing connected clients</i></p>
+      </td>
+      <td width="50%">
+        <img src="docs/FirstClient.png" alt="Client Interface" width="100%" style="border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
+        <p align="center"><i>Client interface with messages in chat from another client</i></p>
+      </td>
+    </tr>
+  </table>
+</div>
 
 ## 🏗️ The Grand Blueprint
 
@@ -131,9 +147,34 @@ vcpkg install hello-imgui
 - Can the server handle 100 clients? (Probably not, but let's try!)
 - How badly can we break the network and still recover?
 
+<!-- Collapsible FAQ Section -->
+<br>
+<details>
+  <summary><b>🤔 Frequently Questioned Absurdities</b></summary>
+  
+  <p><b>Q: Why ENet instead of literally anything else?</b><br>
+  A: Because I like to make things difficult for myself.</p>
+
+  <p><b>Q: Will this ever be finished?</b><br>
+  A: <span title="No, but I'll keep adding things until I get distracted by something shiny">Maybe!</span></p>
+
+  <p><b>Q: Can I use this code for my own projects?</b><br>
+  A: I mean, you <i>could</i>, but why would you <i>want</i> to? That's like choosing to eat off the floor when there's a perfectly good table.</p>
+
+  <p><b>Q: How many bugs are there?</b><br>
+  A: Too many to count!</p>
+
+  <p><b>Q: Did you test this thoroughly?</b><br>
+  A: I clicked the "Run" button and it didn't immediately crash. That counts, right?</p>
+</details>
+
 <div align="center">
-    <br>
-    <p><sub>Made with 🍕, and questionable code decisions</sub></p>
-    <p><sub>No networks were permanently harmed in the making of this project, I think, I hope, My internet has been playing up since</sub></p>
-    <img src="https://media1.tenor.com/m/aGA-AhVPXS0AAAAd/gato-enojado-insano-waza.gif" alt="cat" width="200px">
+  <br>
+  <p><sub>Made with 🍕, and questionable code decisions</sub></p>
+  <p><sub>No networks were permanently harmed in the making of this project, I think, I hope, My internet has been playing up since</sub></p>
+  <img src="https://media1.tenor.com/m/aGA-AhVPXS0AAAAd/gato-enojado-insano-waza.gif" alt="cat" width="200px">
+    
+  <p>Visitor count:</p>
+  <img src="http://estruyf-github.azurewebsites.net/api/VisitorHit?user=alexmollard&repo=EnetPlayGround&countColorcountColor&countColor=%237B1E7B" alt="Visitor Count" />
+  <p><sub>(it's just you, no one else knows about this)</sub></p>
 </div>
