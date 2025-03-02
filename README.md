@@ -8,6 +8,7 @@
     <a href="#-the-grand-blueprint">The Blueprint</a> •
     <a href="#-how-to-join-the-fun">Get It Running</a> •
     <a href="#-lets-play">Play With It</a> •
+    <a href="#-things-im-working-on">Work In Progress</a> •
     <a href="#-experiment-ideas">Break Things</a>
   </p>
   
@@ -142,10 +143,32 @@ vcpkg install hello-imgui
 3. Watch them try to talk to each other
 4. Be amazed when it actually works
 
+## 🛠️ Things I'm Working On
+- [x] Basic client-server communication
+- [x] Multiple clients connecting and chatting
+- [x] Sending and recieving player positions
+- [x] More robust error handling that will share libs between client and server
+- [x] Auto sign in for clients
+- [x] Add a way to send messages to specific clients
+- [x] Admin controls for the server
+- [ ] Better encryption (Right now its a simple hash)
+- [ ] More robust error handling (such as packet loss, mutex locks)
+- [ ] More elegant shutting down of the server when you ctrl+c out of it (right now it just crashes)
+- [ ] Fix the bug where the server crashes after a client registers whilst another client is already connected
+- [ ] Proper GUI for the server (right now its a console with commands)
+
+
 ## 🧪 Experiment Ideas
 - What happens if we send a million packets?
 - Can the server handle 100 clients? (Probably not, but let's try!)
 - How badly can we break the network and still recover?
+- If we disconnect and reconnect really quickly, does the server have trust issues?
+- What's the largest message we can send before things explode?
+- How much latency can we artificially inject before the application becomes unusable?
+- If we run the server on a potato (low-end machine), will packets get baked?
+- What happens if we flood the network with useless packets? (DDoS yourself for science!)
+- Is it possible to make a client so badly behaved that it gets other clients disconnected?
+- How would encryption impact performance? (Spoiler: it makes things slower, who knew?)
 
 <!-- Collapsible FAQ Section -->
 <br>
