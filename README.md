@@ -3,11 +3,11 @@
   <p><strong>My personal networking sandbox where packets go to play!</strong></p>
   
   <p>
-    <a href="#features">Cool Stuff</a> •
-    <a href="#structure">The Blueprint</a> •
-    <a href="#setup">Get It Running</a> •
-    <a href="#usage">Play With It</a> •
-    <a href="#development">Break Things</a>
+    <a href="#-cool-stuff-im-playing-with">Cool Stuff</a> •
+    <a href="#-the-grand-blueprint">The Blueprint</a> •
+    <a href="#-how-to-join-the-fun">Get It Running</a> •
+    <a href="#-lets-play">Play With It</a> •
+    <a href="#-experiment-ideas">Break Things</a>
   </p>
   
   <img src="https://img.shields.io/badge/language-C%2B%2B-blue.svg" alt="Language">
