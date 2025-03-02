@@ -153,7 +153,7 @@ vcpkg install hello-imgui
   <summary><b>🤔 Frequently Questioned Absurdities</b></summary>
   
   <p><b>Q: Why ENet instead of literally anything else?</b><br>
-  A: Because I like to make things difficult for myself.</p>
+  A: Because I when I did a 5 second google search it was between this and RakNet, and RakNet is dead. Also I dont know what I am doing.</p> 
 
   <p><b>Q: Will this ever be finished?</b><br>
   A: <span title="No, but I'll keep adding things until I get distracted by something shiny">Maybe!</span></p>
@@ -166,6 +166,37 @@ vcpkg install hello-imgui
 
   <p><b>Q: Did you test this thoroughly?</b><br>
   A: I clicked the "Run" button and it didn't immediately crash. That counts, right?</p>
+  
+  <p><b>Q: Is this production-ready?</b><br>
+  A: Only if your production standards include "works on my machine" as the sole acceptance criteria.</p>
+  
+  <p><b>Q: How's the documentation?</b><br>
+  A: The code is self-documenting, if you squint hard enough and have a vivid imagination.</p>
+  
+  <p><b>Q: What's your packet loss rate?</b><br>
+  A: Let's just say it's more of a "packet donation program" than a reliable network and im yet to add tracking for it.</p>
+  
+  <p><b>Q: How many concurrent users can it handle?</b><br>
+  A: At least 2, maybe 3 if the planets align and my CPU isn't busy thinking about other things. It also crashes on a second register but ill fix that soon I hope.</p>
+  
+  <p><b>Q: What's your development roadmap?</b><br>
+  A: Step 1: Make it work. Step 2: Wonder why it works. Step 3: Break it while trying to improve it. Step 4: Repeat.</p>
+
+  <p><b>Q: Why are you like this?</b><br>
+  A: I think it's because I never learned how to properly use a semicolon. like wtf even is that!</p>
+
+  <p><b>Q: Can I ask more questions?</b><br>
+  A: Sure, but I aint promising answers</p>
+
+  <p><b>Q: Why are you still reading this?</b><br>
+  A: I have no idea, I thought you would have left by now</p>
+
+  <p><b>Q: Are you okay?</b><br>
+  A: I am not sure, I have been staring at this screen for a while now</p>
+
+  <p><b>Q: Do you need help?</b><br>
+  A: I am fine, Im going to go to bed now</p>
+
 </details>
 
 <div align="center">
@@ -173,6 +204,5 @@ vcpkg install hello-imgui
   <p><sub>Made with 🍕, and questionable code decisions</sub></p>
   <p><sub>No networks were permanently harmed in the making of this project, I think, I hope, My internet has been playing up since</sub></p>
   <img src="http://estruyf-github.azurewebsites.net/api/VisitorHit?user=alexmollard&repo=EnetPlayGround&countColorcountColor&countColor=%237B1E7B" alt="Visitor Count" />
-  <p><sub>(it's just you, no one else knows about this)</sub></p>
   <img src="https://media1.tenor.com/m/aGA-AhVPXS0AAAAd/gato-enojado-insano-waza.gif" alt="cat" width="200px">
 </div>
