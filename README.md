@@ -199,6 +199,8 @@ vcpkg install hello-imgui
 
 </details>
 
+---
+
 <div align="center">
   <br>
   <p><sub>Made with 🍕, and questionable code decisions</sub></p>
