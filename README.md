@@ -151,10 +151,11 @@ vcpkg install hello-imgui
 - [x] Auto sign in for clients
 - [x] Add a way to send messages to specific clients
 - [x] Admin controls for the server
+- [ ] Find a better solution for multi threading the server (Way too many deadlock issues)
+- [ ] Fix the bug where the server crashes after a client registers whilst another client is already connected
 - [ ] Better encryption (Right now its a simple hash)
 - [ ] More robust error handling (such as packet loss, mutex locks)
 - [ ] More elegant shutting down of the server when you ctrl+c out of it (right now it just crashes)
-- [ ] Fix the bug where the server crashes after a client registers whilst another client is already connected
 - [ ] Proper GUI for the server (right now its a console with commands)
 
 
