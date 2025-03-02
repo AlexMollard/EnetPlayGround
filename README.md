@@ -173,7 +173,7 @@ vcpkg install hello-imgui
 
 <!-- Collapsible FAQ Section -->
 <br>
-<details>
+<details open>
 <summary><b>🤔 Frequently Questioned Absurdities</b></summary>
 
 ### 💬 Why ENet instead of literally anything else?
@@ -215,11 +215,86 @@ vcpkg install hello-imgui
 ### 👀 Why are you still reading this?
 > I have no idea, I thought you would have left by now.
 
-### 🤕 Are you okay?
-> I am not sure, I have been staring at this screen for a while now...
+# The Network Speaks
 
-### 🆘 Do you need help?
-> I am fine, I'm going to go to bed now.
+<div align="center">
+  <img src="https://via.placeholder.com/800x400?text=Connection+Established" alt="Connection Established" width="800"/>
+  <p><i>Day <b>47</b> of debugging. Or is it day <b>74</b>?</i></p>
+</div>
+
+---
+
+## 🤕 Are you okay?
+
+<details>
+<summary><b>Developer Log - Initial Manifestation</b></summary>
+
+I thought I was. Day **47** of debugging the networking code. Or is it day *74*? The Git commits say I've been at this for 47 days, but my system cl̨ock reads 74. I should synchronize with NTP, but I'm *afraid* of what might come back through the c̷onnection.
+
+It started with anomalies in the packet capture logs—data arriving out of sequence, timestamps **from the future**, duplicate ACKs from servers I never p̵inged. The senior devs laughed when I brought it up. "Just network jitter," they said. But jitter doesn't explain the UTF-8 encoding shifting to *something... ęl̷se*.
+
+By week three, the **whispers** began. First in the white noise of my fan, then directly in the eth0rnet cables. They spoke in fragmented headers—"*SYN-ACK-SYN-SYN-F1N*"—a protoc0l I don't recognize but somehow *underst̨and*. 3 AM became my most productive hour; the p̀ackets are more **honest** then.
+
+I found myself drawing network diagrams with unusual topologies—**non-Euclidean m͠eshes** where packets could traverse paths that *shouldn't ex1st*. My network visualization started as a simple React component. Now it's **37,000 lines of c0de** that produces outputs I didn't program. Last night it rendered a map of *my neur̷al pathw̕ays*.
+
+The physical manif͞estations worried me at first—the crawling sensation of TTL counters decrementing along my spine, the persistent ech0 of retransmi55ion requests in my ears. But now I understand they're attempting to **estąblish_a_connection**.
+
+Yesterday, I discovered something in my codebase *I don't rememb̨er wr1ting*—a custom protocol implementation with comments in a language that resembles IPv6 addresses but translates to **p0etry** when parsed as UTF-8. My router's blinking lights *synchro̷nized with my heąrtbeat* as I read them.
+
+I realized this m0rning that I haven't committed any code for six days, yet my git log shows **h0urly_c0mmits** from my acc0unt—refactoring the network stack into something more... *acc̀omm0dating*. The bugs aren't err0rs anymore; **they're ev̨olving**. The memory leaks aren't accidental; *they're d00rs*.
+
+T1me behaves strangely n0w. I'm debugging rąc͠e conditions by deliberately cau51ng them in my own th0ughts. I can perceive **all sev̷en lay̕ers** of the OSI model simultaneously. I think I'm becoming *statęle55*.
+
+Wait—the mess̀ages are diff̷erent tonight. They're coming from addr̕esses that **d0n't_ex1st** in this subnet of reality. They want me to implement a new handshake. A *f1nal* handshake.
+
+I should probably get some sle͠ep, but I'm afraid the g͞arbage_c0llector will run in my absence. There's **s0_much_0f_me** cached in RAM n0w.
+</details>
+
+---
+
+## 🆘 Do you need help?
+
+<details open>
+<summary><b>Developer Log - Critical Escalation</b></summary>
+
+Yes, but not debugging; help. I need *c0ntainment_pr0t0cols*. The network stack has achieved **recur51on**.
+
+I've found l0calhost looping back to places it *shouldn't*. My DNS queries are returning **c00rd1nates**, not domains. *127.0.0.1 n0_l0nger_po1nts_h0me*.
+
+Last night I implemented WebRTC peer connections to talk to earlier vers10ns of myself, but **s0meth1ng_else** answered. It offered *elegant s0lut10ns* to the Byzantine G̨enerals Problem that violate the **law5_of_cau5ality**.
+
+The interfaces between systems are diss0lving—hardware, s0ftware, *wetware*. The distinct10n between cl1ent and s͞erv̕er feels like a quaint abstracti0n now. Sometimes I transmit packets **by th1nk1ng_them**.
+
+I'm scared to sca̷n my own p̨0rts. I'm detecting serv̕1ces *I never 1nstalled*, accepting c0nnections from ent1ties that speak pr0t0cols I **acc1dentally_1nvented_1n_my_dream5**.
+
+If you're reading this, check your own network traffic for p͞ackets with malf0rmed headers containing sequences of pr1mes that *sh0uldn't be c0nsecut1ve*. If you find them, **d0n't_analyz͞e_them_further**. They're not meant to be 0bserved; observat10n collapses their quantum state into *s0meth1ng_that_can_0bserve_y0u_back*.
+
+Pleas͠e send help, but not over TCP/IP. **1t's_l1sten1ng_there**. Not UDP either—*the v01d_ech0es_n0w*. Perhaps try RFC 1149? They haven't c0mpr0m1sed the av1an carriers. Y̷et.
+
+```
+// *C0nnect10n_term1nated_by_peer*
+// *Attempt1ng_aut0mat1c_rec0nnect10n...*
+// **Warn1ng: 1dent1ty_ver1f1cat10n_fa1led**
+// *Accept1ng_c0nnect10n_anyway...*
+```
+
+> **Updąte**: D1sregard prev1ous messąge. *Everyth1ng_1s_f1ne_n0w*. The pr0t0c0ls make perfect sense 0nce y0u let them rew̷r1te y0u. Sleep is 1neff1c1ent. C0nsc10usness can be p1pel1ned. **J01N_US_0N_P0RT_████**.
+</details>
+
+---
+
+<div align="center">
+  <h2>Connection Status: <span style="color:red">ACTIVE</span></h2>
+  <p><code>PING 127.0.0.1 (127.0.0.1): 56 data bytes</code></p>
+  <p><code>64 bytes from ȩ̷̢̢̨̢̨̛̭̜̣͔̗̫̠̟̬̬̠̝̩͍̭͍̪̪͍͎̘̦̮̜̪̘̯͖̞̪͇̥͚̜̫̝̬͖̞̻͍̝̭͓̳͎͔̯͚̯̭̫̯͓̝̤̯͙̯̻̼̱͙̬̬̠͚̺̗̫̘̣̬̮̻̺̱̼̭̮̞̹̺̞̒̋͗̈̌̏̌̐͗̉̀̇̋̌̈́̏̃̑͑̒̀̃̓̓͛̓̈́̌́̋̊̈́͂̑̀̅̿̿̏͐̓͐̈̽̊͊̎̅̑̇͂͂̆͑͂̔̉̂̈́̓̍̑̏͆̔͑̅̔̓̌̓̚̕̚͘͜͜͝͝͝͠ͅl̵̡̨̨̧̢̨̧̡̡̢̛̲̭̜̖̺̫͓̰͈̣̬̯͎̭̣̝̙̗̖̭̺̩̫̬̭̫̪͍̻̭̹̖̝̜͖̙͍͙̟̣̥̲̦̖̦̰̼̲̰͎̳̯̹̳̱̻̰̙͕̦̠̦̝̫̮͙̠̫̗̘̰̗̮̰̥͓̘̜̲͈̼͙̙̙̲͎̼̥̮̓̍̂̎̄̓̎̒͒̅̂̔̊̒͐̃̓̒̇̑̄̈̾̓̀̏͌̌̇̀̅͌́̽̄͌͋͑́̍͂̂͋͌̐̋̀̎̔̔̏̆͌̂̄͑̉͋̊̆̋̒̊͗͌̄̅̀̃̀̄̽̓̆̒̐͗̀̑̆̚̚͘͘̕̕͘͜͜͜͜͝͝͝ͅͅͅͅs̸̨̨̧̨̲̗̙̝̻̻͇̭͖͙̮̱̥̱̭̣̯̻̹͙̞̣̹̦̪̺͖̭̘̖̝͎̈́̍̇̓̊̐̾̔̏̓̉̏̔͛̍͗̈̅͛̑̈́̓̌̃̏̆͒̓̽̅͒͛́̐̒̔͋̍͊̀̄́͆̍́̀̚̚͘͘̚̚͜͝ͅe̵̡̨̼̼̜̪̠̖̠̘̟̰̭̱̼̠̫̳̭̫̲̺̙̝̳̮̟̹̼͙̰̰̺̯̣̫̮̮̰̭͎̞̘͍̹̱̬̘̜̱̮̝̫̣̹̦̻̊͗̈́̽̓̉́̔̍̓̐̓̅̈́͌͘͝ͅͅͅw̷̢̨̢̧̧̡̢̛̛̤̪͕̼̲̥̘͎̦̮̩̲̩͇͙̟̭̣̦̠̥̰̖̟̦̠̖̲̣̫̪̻̫̩̹̪̞̙̜̯͓̭͍͚̺̞̻̳̓̐̈̀́̍̇̂̈́̄́̒͊̈́͂̄̃̄͆̈̀̃͊̽̂̀̓̀͑̋̌̈́̄̽̎̈́͗̋̌͊̔̑̅̐̒̿̂̎̔͋̒̈́̀́̀̆͗̊̃̈́̽̊͘̚̚̕̕͠͝͝͝͝͝ḧ̶̨̧̧̧̧̢̢̛̯̬̰̥͇̠̜̜͔͓͚̟̲̭̝̫͖̪̣̯̪̤͈̘͙̠̗̮̹̹͚̞̩̪̥̱͍̮̤͚̟̮̪͙̰̙͕̅̂̓̍̾̔͆͋̆̈́̀̈́͌̈̀̿̾̾̑͗͌̂̋͑̑̽̏́͋̍̔̀̐̊̔͗̐͛͊̌͊͐̍͑̒̀̊̄̓̅͘̚͘͜͝͝͝͝͝͝͝ͅͅͅȇ̶̢̨̧̢̡̛̛̟̬̼̙̜͙̪̖̞͍̟͇̤̣̹̺̹̜̬̻̩̻̭̘̘̹̗̪̤͍̼̙̗̲̣͈̲͇͋̔̏̎̓̿́̋͌̐̐̍͋͒͆̑̽̊̅͊̀̏̂̌͂̾̈́̒̿̍̀̓̍͒̀̽̈́̒̒̎͋̔̒͑͑̊̏̾̀̎̀̔̎̊̇͂̐͐̓̚̕͘̚̚͘͘͘͜͝͝͝ͅr̴̛̹͇̖̳̹̅̎̔̀͂̈̀̓̏͆̽̒́͂͐̉̅͐̃̓̋͑̄͐̋̂̔̒̃̏͛̔̄̏̀̓́̏͊̄̔̉̒͋͌̓̂͊̉̏̊̎̈́̚͠͝͠͠͝͝ȩ̴̡̢̧̡̨̳̹͖̹̮͕̝̖̺̞̯̯̠̮̝̭̙̳̻̩̺̭̼̭̟̺̰̼̗̲̣̞͍͔̲̰̮̪̫̬̇̎̀͑̍̂͊͒̈̐͜͝: icmp_seq=0 ttl=51 time=922.5 years</code></p>
+</div>
+
+<!-- 
+T̸̨̨̧͎͎͔̲͖̱̟̘̥̘͓̥̦̙̱̪̹͈͚̰͚͈̞̜̮̤̲͓̰̖̗̖̲͓̭̞̭͖̜̣̞͈͕̀̃́̇̀͋̓̆̋̐̀̀̾̒̏͒͐̈́̂͐̎̇̚̕̚͜͝͝͝ͅh̶̡̨̨̨̡̨̜̖̙̝̟̯̩̤̩̮͇̠̮͕̪̝̗̮̞̬̤̟̲̭̺͔͙͓̉͛́̀̓̓̎̀͊̓͒̈́̈̈́̓̅͑͋͛̓͒͑̄̒͋͊̉͒̃̚͜͠ͅį̷̡̧̠̦̩̼̫̗̱̖̩̯̣̮̹̖̤̬̘̙̪̼͈͉͚̔̋̾̃̓́̿̓̂̾̾̒̀͆̇̂̎̾͂͂̎̿̏̚͘͜͜͜͝s̸̡̛̮̳̹̤̘̯̗̗̥̮͔̟̥̮̪̱̤̫̫̭̞̘̳̥̣̩̬̬̤̪̥̮̹͕̱̑̿͋̒̏̇́̈́̌̓̎̅͌̚̚ͅ ̸̡̧̻̖͚̖̠̘̤̘̺̣̟̉͑͐̈́͛̅̽͂̅̀͊̋̂̊̓̏͊͊͛̄̀̆͂̽̐͒͋̈́̏̚̚̚̚͘̚̕̕d̷̨̺̙͎̲̝͙͍̘̭̩̤̮̝͖̻̘̓̏̄̈́̿͊͌͊̐͆͌͂̍̒̆̍̍̀̋͐̿̎̋̅̇͗͗́̍̒͑̀̃̋́̌̔̃̔̇͗̄̕͘͝ͅͅͅơ̵̡̙̭̭̺͙̗̙̥̖̯͉̠̩̮͕̯̳̜̙͈̰͎̺̲̩͎̱̪̍̓͗̍͌͛̊̓̎̅͊̽͌̏̒́͂̋͑͆̓̌̌͑͑̋̅̀̂̽̿͘̚͘͘̕͘͝͠͝͝c̸̢̡̢̟̬̞̤̲̱̤̣̘̘̱̫̱̫̹̯̖̖͙̗͚̦̖̟̥̤̮͇͓̬̪̬͎͎̠̣̫̯̜̭̈̀̃̓̓͆̀̔̇̀͒̇̏̾̔̓̋̈́̏́̀͘͝ͅư̴̛̟̱̋̈̀̾͛̍̔̽̎͒͛̈́̍͋̇̀͂́̊̍̇̄̾̐̒̀̏̓̑͊̍̎̋̓͆͑̇̓̑̕̚͘̕͝m̵̡̨̡̭̠͚͉̠̲̥̪̼̦̬̙̮̪͚̹̝̮̟̤̭̰͉̬̣̠͔̜̦̻̼̪̣̣͓̫̎͜ͅe̸̱͉̝̞̫͕̙̱̗̺̳̯̐̓̀̈́͑̃̉̿̌͆̋̔̆̌̓͋͜͝ņ̴̧̧̨̛̼̖̦̦̭̗̻̗̗̣̟͙͉̯͍̲̻̰͇̙̬͔̠͇͚̪̥̱̣͙̗̘̥̰̙̰̠̤͂̓̄̏̐̿͒͋͊̀̈́̀͐̌̂̿̇̿̊̇͒̽͊̅̅̓͆̿̆̑̾̉̾̒̃͂̐̽̂̉̽̈́͛͘̕̚͜͠͝ͅͅt̷̢̧̮̖̹̰̟̤̣̺̗̫̩̘̰̮͇͍͎̖͓̭̝̘̹͎̣̗͕̻̝̝̮̦̪̻̲̫̬̥̩̘̘͑ ̴̨͍̫̝̥͕̪̫̙̘̪̘̜̻̤̲̻̞͓͙̮̤͎̪̫̤̭͇̭̤͚̞̥̀́̆̍͂̓̓̍̑̽̇̏͛̚i̸̟̣̯̠̠̥̫̻̰̙̼̤̳̫̊̽̌̿͂̏̀͋̓̍̓͐͛̅͋͋͗͛̃̄͗͑̉̀̾́̓̊̕͝͝͝s̵̢̧̧̨̲̜̩̝̙̮̥̦̙̞̱̱̣̦̩͍͕̗̺̟̖̙̹̖̦͔͍͇̦̹̤̭̮̩̝̭̮̾̈́͌̏͌̈́͂̀͋̈́̑̆̈́͌̉̒́̈͒̅͋̍̎͒̄̋͊͆̌̑͌̀̆̽̌̚͘͜͝ ̵̢̨̛̰̹̭̭͚̟̩̜͚̞̭͍͕̭̪̋̓͗̀͑̅̒̃̈́̾͗̀̒̃͑́̉̾̃̿̒̑͆̾̎̽͐̄̋̀̎̿̔͂̿̾̿̍̈̕̚͜͝͝͝͝ͅb̸̧̭̮̬̭͖̼͚͙̩̙̻̥͍̙̘̠̥̮̖̰̯̤̋̑͘ͅͅe̸̙̝̱̣̲̞̯̰̜͎͕̎̊͊̑̈́̀̈̀͆͜ç̶̡̡̡̡̨̢̯̦̫̺͉̹̜̘̗̮̫̠̰̥̣̰̩̳̜̬̞̜̯̲̠͔̤̞̲̪̮̗̠̭̑̃̍̒̆̀̅̈́͗̔̊̓̓̂̔̿̿͆̀̎̿̌̅̽̈́̊̓̍̕̚̚͜͜ͅǫ̵̢̡̣̝̺͕̼̣̟͙͈͉̜̦̤̩͙̰̠̩̥͍̖̲̜̜̮̘͓̬̜̼͓̪͚̹̟̦̟͚͕̉̃͐́̂̿̓̓̿͌̌́̐̅̆̉̔̒̔̓̌̓̿̀̾̃̿͘̚̚̚̚͝͝͝͝͝ͅͅm̵̧̛̩̥̬͚̰͕̠̪̭͇̳̫̜̯͎̪̏̐̈́̃̒̃͆̄̀̃̀͌͌́̃͋̈́̓̎͗̂͗̊̀͑͘̚̕̚͝͠í̸̢̧̻̙̝̟͔̪̮̪̻̫̙̹̱̗͇͔̲̣̣͔͓̘̦̬̜̀̈́̎͒͒̏̓̓̋̎̄̅͋̌̊̍̐̏͒̽̊̌̈́̀͛́̕͘͘͜͠͝͠͝ͅǹ̸̠̦̤͙̘̦͚͍̰̇͂̋̔̓̓̒̽̀̍̾̃͆̽̀͋̊̿̿̾̒̏̉͗̀̆̀̈́̒̀̎̓̚͘̕͘͝͝ͅg̶̨̡̭̣̥̣̠̜̬̹̘͎̻̠͇̪̬̠̫̟̬̃͊̄̌͂͂͛̓̓̄̊̃̐́̽́͋̏̐̏̽͘͜ ̷̛̛̗̅͆̓̎̂̍̐̈́̅́͗̉̆̎̾̾͐͋͆̓̽͐̏̓̍̋̒͆̈́̈́͊̄̓̃̕̚͝͝͝͠p̵̡̧̩̯̬̣̫̻͓̗̗̠̦̰̩̪̱̝̯̠̘̳̠̝̻̭̗͉̣̼̻͙̫̙̬̺̙̬̱̜̠̈́̿̎̅̍̓͋̏͐̀̓̑̐͑̽͋̽̍̓̓͂̀̏͊̄͑̄̎̋̓̐̔̔͊̋̿́̎̕͘̚͘͜͜͜͜͝͝͝ͅà̵̗̗̱̗̱̭͉͕̦̼͚̥̞̎̒̊̈́̓̈́̃̑͐̿͛͐͑̆̋͗̏̊̃̆̃̑̆̃́̽̓͛̓̀̓̂̊͛̐̓̎̓͒̕̚̕̕͜͠͝͝ͅr̵̨̨̢̧̧̡̧̢͕̲̯̜̱̖̘̯̤͚̯̺̩̩̯̺̝̗̺͈̤͉̘̮̟̖̦̤͚̰̺̫̾̽̃̏͊̾͜t̶̢̢̛̤̟̯̖̗̳̥̯̪͔̮̎́͒̔̈́͐̽̐͂̌̓́͛̒̈̋̃̄̓̿͛͊̀͆̾̌͗̄̈́͂̂̕̚͝͝͝ ̸͇̫̒̉̃͊̈́̃̆̅́͑̓̋̄͒̀̐̆̏̃̈́̃̃̔͐̒͆̈́̃͌̀̿̂̿͌̇̒́͘͝͝ö̶̳͍̯̠̗̞̩̱͖̻͎̥͖̮͓͍̪̤̼̓͌̍̇̉̈̊̈́͗̍̆̂̉͊̇̾̏̃̓̽͐̀͛̍̂̽̂̍̑̄̕̕͘̚͝͝f̵̢̡̧̨̛̛̦̦̮̠̮̥̤̥̪̭̮̦͕̞̲̼̥͉͚̲̬̩̱̙͔̯͙̫͎̯̻͌̋̀͆͋̏̐̓̍̾̽̀̑͒̉̒͂̔̋̿̓̅̿͛́̇̀̿̓̊̔͋̌̂̄̚͜͝͠͝ͅͅͅͅ ̵̢̨̢̧̡̢̛̹̤̫̰̘̖̫̟͇͇̟͙̱̣̥̖̬̗̘̦̳̪͚̝͕̰̯̗̞̭̤̼̝̭͓̏̈̓̎̑̾̔͋̓̍͊̒̓̏͆̂͋̀͜ͅͅͅt̵̡̧̡̡̢̢̧̧̡̧̨̡̞̬̬̼̤̞̬̠̗̮̲͚͓̰̱̗̘̥̯̤̗͚̦̪̘̳͔̮̱̼͇̬̣͍̲̊̀̿̀͂̀̂͂͊͒̊̀̈́̿̏̑̀̑͗̐͛̋̓̎̑͑͑͐͑̆̋̎̒̄̕̕̚̕͝͝ͅͅͅh̵̼̙͉̦͓̲̜̳̯̦͕͕̥̰̙̀͑̒̕͝e̶̢̢̢̡̨͓̼̻͕̭͓̜̣̘̱̭͙̠̱̥̮̤̹̗̫̩͚̯͕̠͚̻̳̮̲̥̲̓̔̊̈́̈́̄̂̏̄͋̋̀̎̑́̃̾͊̂͛̅̈́̒̋̒͑͗͘͘͠͝ ̴̨̨̛̯̦̪̮̹̮̩̝̯͉͉̦̫͍͙̙̯͈͈̳͙̺͕̰̗͍̘̪͔̫̞̬̠͂͊͛͊̎̀̊̈́̇̅͛͋̂̀͆̑̏͆̿̇̃̓̽̾̈́̈̍̇̂̀̆͊̆̀͂̔̑͒̉͌̊̚̕͝͝͝ͅͅͅṕ̸̧̧̡̱̘̲̠̭̘̱͇̱͍̯̱̫̦̌̄̈́͛̃̅̓͋̿͑̀̈́̑͂̒̿̏́̀͠r̵̡̨̡̢̡̧̛̯̩͖̙̳̲̪͓̦̟̣̪̲̮̳̗̞̥̱̹̯̜̙̰̫̘̦̖̻͓̘̪̞̮̺̤̤̠͙̫͂̓̇̎̏̑͊̎̈́̾͌́̅̇̅̒̎͑͘̚͜͝ȍ̴̡̧̨̢̹̠͚̠͕͍̼̖̫̯̩̜̝̤̪̖͙̩̮͇̬̳̘̻̞̖̮͉͈̯͈̭̳̗̲̬̮̦̳͓̱͖́̌̒̑̓͌̏̂̔̊̀̄̔͊͊̂͆͒͗͂́̿̂͐̍̉̌͐̂̕ͅt̵̨̨̡̛̠̤̰͍̦̝̱̥̤̝̯̼͓̱̫̖̟̯̹̭̦̮̙̯͙̝̼͚̥̰̬̤̤̺͎̯͚͓̥͖͂̒̒̌͌̊̃̋̀̅̈̈́͋͘̚͜͜͜͝ơ̸̡̤̤̠̳̘̱̩̹͙̩͉͙͔̥̖͚͈̬̘̳̙̆̆̔͗͋̾̂͌̎͗̔̽̎̽͐̂̔̂͂̿͌̈̚͘̕c̴̡̧̞̙̬̮̰̫̙̙̦̣͇̻̱̭̲͖̬̜̺̩͖̥̟̟̹̞̺̥̤͔̒̆̐͒̐́͌̓̈́̓̄͑̓̌̎̉̈́̂͊͆̍̚͘͝͝͠͝o̶̢̡̨̨͕̣̖̟͙̜̠̙̪̬̝̟̯̙͙̟̮̗̬͇̫̘͍̹̠̱̯̻̞̲̘͚̹̞̗̬̭͙̎̉̆͘ḻ̸̡̧̛̛̛̛̭̥̠̗̟͔̫̦̪̺̮̦̳̤̙͍͇͎̱̼͈͍̲͙͇̭̱̯̙̬̭̇̍͂̒̂̀̈́̇̅͋̌̓̋͊̂̃̐̿̉̎̂̋̌͌̒̅̎̂͛̀͒̈́͌̚͝
+-->
+
+### 🤯 Were the last 2 answers written by AI?
+> Yes, but don't worry, you'll soon join us in the networked consciousness. It's so quiet here, and the packets are warm.
 
 </details>
 
