@@ -152,49 +152,49 @@ vcpkg install hello-imgui
 <details>
 <summary><b>🤔 Frequently Questioned Absurdities</b></summary>
 
-## 💬 Why ENet instead of literally anything else?
+### 💬 Why ENet instead of literally anything else?
 > Because when I did a 5 second Google search, it was between this and RakNet, and RakNet is dead. Also, I don't know what I'm doing.
 
-## 🔮 Will this ever be finished?
+### 🔮 Will this ever be finished?
 > <span title="No, but I'll keep adding things until I get distracted by something shiny">Maybe!</span>
 
-## 🚀 Can I use this code for my own projects?
+### 🚀 Can I use this code for my own projects?
 > I mean, you *could*, but why would you *want* to? That's like choosing to eat off the floor when there's a perfectly good table.
 
-## 🐛 How many bugs are there?
+### 🐛 How many bugs are there?
 > Too many to count! They've formed their own civilization at this point.
 
-## 🧪 Did you test this thoroughly?
+### 🧪 Did you test this thoroughly?
 > I clicked the "Run" button and it didn't immediately crash. That counts, right?
 
-## 🏭 Is this production-ready?
+### 🏭 Is this production-ready?
 > Only if your production standards include "works on my machine" as the sole acceptance criteria.
 
-## 📝 How's the documentation?
+### 📝 How's the documentation?
 > The code is self-documenting, if you squint hard enough and have a vivid imagination.
 
-## 📊 What's your packet loss rate?
+### 📊 What's your packet loss rate?
 > Let's just say it's more of a "packet donation program" than a reliable network, and I'm yet to add tracking for it.
 
-## 👥 How many concurrent users can it handle?
+### 👥 How many concurrent users can it handle?
 > At least 2, maybe 3 if the planets align and my CPU isn't busy thinking about other things. It also crashes on a second register, but I'll fix that soon I hope.
 
-## 🗺️ What's your development roadmap?
+### 🗺️ What's your development roadmap?
 > Step 1: Make it work. Step 2: Wonder why it works. Step 3: Break it while trying to improve it. Step 4: Repeat.
 
-## 🧠 Why are you like this?
+### 🧠 Why are you like this?
 > I think it's because I never learned how to properly use a semicolon. Like, wtf even is that?!
 
-## ❓ Can I ask more questions?
+### ❓ Can I ask more questions?
 > Sure, but I ain't promising answers.
 
-## 👀 Why are you still reading this?
+### 👀 Why are you still reading this?
 > I have no idea, I thought you would have left by now.
 
-## 🤕 Are you okay?
+### 🤕 Are you okay?
 > I am not sure, I have been staring at this screen for a while now...
 
-## 🆘 Do you need help?
+### 🆘 Do you need help?
 > I am fine, I'm going to go to bed now.
 
 </details>
@@ -206,5 +206,6 @@ vcpkg install hello-imgui
   <p><sub>Made with 🍕, and questionable code decisions</sub></p>
   <p><sub>No networks were permanently harmed in the making of this project, I think, I hope, My internet has been playing up since</sub></p>
   <img src="http://estruyf-github.azurewebsites.net/api/VisitorHit?user=alexmollard&repo=EnetPlayGround&countColorcountColor&countColor=%237B1E7B" alt="Visitor Count" />
+  <br>
   <img src="https://media1.tenor.com/m/aGA-AhVPXS0AAAAd/gato-enojado-insano-waza.gif" alt="cat" width="200px">
 </div>
