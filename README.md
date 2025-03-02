@@ -49,6 +49,8 @@ I actually made this project because I have been playing alot of mmo's and wante
   </tr>
 </table>
 
+<img src="docs/FirstWorkingChat.png" alt="first screenshot">
+
 ## 🏗️ The Grand Blueprint
 
 ```
