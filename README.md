@@ -172,9 +172,7 @@ vcpkg install hello-imgui
   <br>
   <p><sub>Made with 🍕, and questionable code decisions</sub></p>
   <p><sub>No networks were permanently harmed in the making of this project, I think, I hope, My internet has been playing up since</sub></p>
-  <img src="https://media1.tenor.com/m/aGA-AhVPXS0AAAAd/gato-enojado-insano-waza.gif" alt="cat" width="200px">
-    
-  <p>Visitor count:</p>
   <img src="http://estruyf-github.azurewebsites.net/api/VisitorHit?user=alexmollard&repo=EnetPlayGround&countColorcountColor&countColor=%237B1E7B" alt="Visitor Count" />
   <p><sub>(it's just you, no one else knows about this)</sub></p>
+  <img src="https://media1.tenor.com/m/aGA-AhVPXS0AAAAd/gato-enojado-insano-waza.gif" alt="cat" width="200px">
 </div>
