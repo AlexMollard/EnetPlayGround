@@ -152,112 +152,50 @@ vcpkg install hello-imgui
 <details>
 <summary><b>🤔 Frequently Questioned Absurdities</b></summary>
 
-<div class="faq-container" style="padding: 20px; background-color: #f5f5f5; border-radius: 10px;">
-  <div class="faq-item" style="margin-bottom: 20px; border-left: 4px solid #ff6b6b; padding-left: 15px;">
-    <h4 style="color: #ff6b6b; margin-bottom: 5px;">💬 Why ENet instead of literally anything else?</h4>
-    <div style="background-color: #fff; padding: 10px; border-radius: 5px;">
-      Because when I did a 5 second Google search, it was between this and RakNet, and RakNet is dead. Also, I don't know what I'm doing.
-    </div>
-  </div>
+## 💬 Why ENet instead of literally anything else?
+> Because when I did a 5 second Google search, it was between this and RakNet, and RakNet is dead. Also, I don't know what I'm doing.
 
-  <div class="faq-item" style="margin-bottom: 20px; border-left: 4px solid #4ecdc4; padding-left: 15px;">
-    <h4 style="color: #4ecdc4; margin-bottom: 5px;">🔮 Will this ever be finished?</h4>
-    <div style="background-color: #fff; padding: 10px; border-radius: 5px;">
-      <span title="No, but I'll keep adding things until I get distracted by something shiny">Maybe!</span>
-    </div>
-  </div>
+## 🔮 Will this ever be finished?
+> <span title="No, but I'll keep adding things until I get distracted by something shiny">Maybe!</span>
 
-  <div class="faq-item" style="margin-bottom: 20px; border-left: 4px solid #ff9f1c; padding-left: 15px;">
-    <h4 style="color: #ff9f1c; margin-bottom: 5px;">🚀 Can I use this code for my own projects?</h4>
-    <div style="background-color: #fff; padding: 10px; border-radius: 5px;">
-      I mean, you <i>could</i>, but why would you <i>want</i> to? That's like choosing to eat off the floor when there's a perfectly good table.
-    </div>
-  </div>
+## 🚀 Can I use this code for my own projects?
+> I mean, you *could*, but why would you *want* to? That's like choosing to eat off the floor when there's a perfectly good table.
 
-  <div class="faq-item" style="margin-bottom: 20px; border-left: 4px solid #a463f2; padding-left: 15px;">
-    <h4 style="color: #a463f2; margin-bottom: 5px;">🐛 How many bugs are there?</h4>
-    <div style="background-color: #fff; padding: 10px; border-radius: 5px;">
-      Too many to count! They've formed their own civilization at this point.
-    </div>
-  </div>
+## 🐛 How many bugs are there?
+> Too many to count! They've formed their own civilization at this point.
 
-  <div class="faq-item" style="margin-bottom: 20px; border-left: 4px solid #45b7d1; padding-left: 15px;">
-    <h4 style="color: #45b7d1; margin-bottom: 5px;">🧪 Did you test this thoroughly?</h4>
-    <div style="background-color: #fff; padding: 10px; border-radius: 5px;">
-      I clicked the "Run" button and it didn't immediately crash. That counts, right?
-    </div>
-  </div>
+## 🧪 Did you test this thoroughly?
+> I clicked the "Run" button and it didn't immediately crash. That counts, right?
 
-  <div class="faq-item" style="margin-bottom: 20px; border-left: 4px solid #e84855; padding-left: 15px;">
-    <h4 style="color: #e84855; margin-bottom: 5px;">🏭 Is this production-ready?</h4>
-    <div style="background-color: #fff; padding: 10px; border-radius: 5px;">
-      Only if your production standards include "works on my machine" as the sole acceptance criteria.
-    </div>
-  </div>
+## 🏭 Is this production-ready?
+> Only if your production standards include "works on my machine" as the sole acceptance criteria.
 
-  <div class="faq-item" style="margin-bottom: 20px; border-left: 4px solid #3da35d; padding-left: 15px;">
-    <h4 style="color: #3da35d; margin-bottom: 5px;">📝 How's the documentation?</h4>
-    <div style="background-color: #fff; padding: 10px; border-radius: 5px;">
-      The code is self-documenting, if you squint hard enough and have a vivid imagination.
-    </div>
-  </div>
+## 📝 How's the documentation?
+> The code is self-documenting, if you squint hard enough and have a vivid imagination.
 
-  <div class="faq-item" style="margin-bottom: 20px; border-left: 4px solid #f77f00; padding-left: 15px;">
-    <h4 style="color: #f77f00; margin-bottom: 5px;">📊 What's your packet loss rate?</h4>
-    <div style="background-color: #fff; padding: 10px; border-radius: 5px;">
-      Let's just say it's more of a "packet donation program" than a reliable network, and I'm yet to add tracking for it.
-    </div>
-  </div>
+## 📊 What's your packet loss rate?
+> Let's just say it's more of a "packet donation program" than a reliable network, and I'm yet to add tracking for it.
 
-  <div class="faq-item" style="margin-bottom: 20px; border-left: 4px solid #9381ff; padding-left: 15px;">
-    <h4 style="color: #9381ff; margin-bottom: 5px;">👥 How many concurrent users can it handle?</h4>
-    <div style="background-color: #fff; padding: 10px; border-radius: 5px;">
-      At least 2, maybe 3 if the planets align and my CPU isn't busy thinking about other things. It also crashes on a second register, but I'll fix that soon I hope.
-    </div>
-  </div>
+## 👥 How many concurrent users can it handle?
+> At least 2, maybe 3 if the planets align and my CPU isn't busy thinking about other things. It also crashes on a second register, but I'll fix that soon I hope.
 
-  <div class="faq-item" style="margin-bottom: 20px; border-left: 4px solid #ff5400; padding-left: 15px;">
-    <h4 style="color: #ff5400; margin-bottom: 5px;">🗺️ What's your development roadmap?</h4>
-    <div style="background-color: #fff; padding: 10px; border-radius: 5px;">
-      Step 1: Make it work. Step 2: Wonder why it works. Step 3: Break it while trying to improve it. Step 4: Repeat.
-    </div>
-  </div>
+## 🗺️ What's your development roadmap?
+> Step 1: Make it work. Step 2: Wonder why it works. Step 3: Break it while trying to improve it. Step 4: Repeat.
 
-  <div class="faq-item" style="margin-bottom: 20px; border-left: 4px solid #ff6392; padding-left: 15px;">
-    <h4 style="color: #ff6392; margin-bottom: 5px;">🧠 Why are you like this?</h4>
-    <div style="background-color: #fff; padding: 10px; border-radius: 5px;">
-      I think it's because I never learned how to properly use a semicolon. Like, wtf even is that?!
-    </div>
-  </div>
+## 🧠 Why are you like this?
+> I think it's because I never learned how to properly use a semicolon. Like, wtf even is that?!
 
-  <div class="faq-item" style="margin-bottom: 20px; border-left: 4px solid #03045e; padding-left: 15px;">
-    <h4 style="color: #03045e; margin-bottom: 5px;">❓ Can I ask more questions?</h4>
-    <div style="background-color: #fff; padding: 10px; border-radius: 5px;">
-      Sure, but I ain't promising answers.
-    </div>
-  </div>
+## ❓ Can I ask more questions?
+> Sure, but I ain't promising answers.
 
-  <div class="faq-item" style="margin-bottom: 20px; border-left: 4px solid #fb8500; padding-left: 15px;">
-    <h4 style="color: #fb8500; margin-bottom: 5px;">👀 Why are you still reading this?</h4>
-    <div style="background-color: #fff; padding: 10px; border-radius: 5px;">
-      I have no idea, I thought you would have left by now.
-    </div>
-  </div>
+## 👀 Why are you still reading this?
+> I have no idea, I thought you would have left by now.
 
-  <div class="faq-item" style="margin-bottom: 20px; border-left: 4px solid #bc4749; padding-left: 15px;">
-    <h4 style="color: #bc4749; margin-bottom: 5px;">🤕 Are you okay?</h4>
-    <div style="background-color: #fff; padding: 10px; border-radius: 5px;">
-      I am not sure, I have been staring at this screen for a while now...
-    </div>
-  </div>
+## 🤕 Are you okay?
+> I am not sure, I have been staring at this screen for a while now...
 
-  <div class="faq-item" style="margin-bottom: 20px; border-left: 4px solid #2b9348; padding-left: 15px;">
-    <h4 style="color: #2b9348; margin-bottom: 5px;">🆘 Do you need help?</h4>
-    <div style="background-color: #fff; padding: 10px; border-radius: 5px;">
-      I am fine, I'm going to go to bed now.
-    </div>
-  </div>
-</div>
+## 🆘 Do you need help?
+> I am fine, I'm going to go to bed now.
 
 </details>
 
