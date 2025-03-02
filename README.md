@@ -213,7 +213,7 @@ vcpkg install hello-imgui
 > Sure, but I ain't promising answers.
 
 ### 👀 Why are you still reading this?
-> I have no idea, I thought you would have left by now.
+> I have no idea, maybe you're procrastinating, or maybe you're just curious. Either way, you're welcome here for now. *they are listening*.
 
 ### 🤕 Are you okay?
 
