@@ -1,30 +1,26 @@
 #pragma once
 
-#include <algorithm>
-#include <cctype>
-#include <chrono>
-#include <cmath>
-#include <conio.h>
-#include <ctime>
+// Standard library includes
+#define WIN32_LEAN_AND_MEAN
 #include <deque>
-#include <enet/enet.h>
-#include <fstream>
-#include <hello_imgui/hello_imgui.h>
-#include <iomanip>
-#include <iostream>
-#include <mutex>
-#include <random>
-#include <sstream>
-#include <string>
-#include <thread>
-#include <unordered_map>
-#include <vector>
 #include <windows.h>
+#include <winsock2.h>
 
-#include "Constants.h"
+// Project includes
+#include <atomic>
+#include <thread>
+
+#include "AuthManager.h"
 #include "Logger.h"
+#include "NetworkManager.h"
 
-// Position structure
+//=============================================================================
+// DATA STRUCTURES
+//=============================================================================
+
+/**
+ * Position structure representing a 3D coordinate
+ */
 struct Position
 {
 	float x = 0.0f;
@@ -42,7 +38,9 @@ struct Position
 	}
 };
 
-// Player info structure
+/**
+ * Player information structure
+ */
 struct PlayerInfo
 {
 	uint32_t id = 0;
@@ -52,7 +50,9 @@ struct PlayerInfo
 	std::string status;
 };
 
-// Chat message structure
+/**
+ * Chat message structure
+ */
 struct ChatMessage
 {
 	std::string sender;
@@ -60,13 +60,95 @@ struct ChatMessage
 	uint32_t timestamp;
 };
 
-// Main client class
+/**
+ * Client connection states
+ */
+enum class ConnectionState
+{
+	Disconnected,
+	LoginScreen,
+	Connecting,
+	Authenticating,
+	Connected
+};
+
+//=============================================================================
+// GAME CLIENT CLASS
+//=============================================================================
+
+/**
+ * Main client class handling game state and UI
+ */
 class GameClient
 {
+public:
+	//-------------------------------------------------------------------------
+	// PUBLIC INTERFACE
+	//-------------------------------------------------------------------------
+
+	/**
+     * Constructor
+     * @param playerName Optional player name
+     * @param password Optional password
+     * @param debugMode Enable debug mode
+     */
+	GameClient(const std::string& playerName = "", const std::string& password = "", bool debugMode = true);
+
+	/**
+     * Destructor
+     */
+	~GameClient();
+
+	/**
+     * Initialize the client
+     * @return True if initialization succeeded
+     */
+	bool initialize();
+
+	/**
+     * Disconnect from the server
+     * @param showMessage Whether to show a message
+     */
+	void disconnect(bool showMessage = true);
+
+	/**
+     * Handle ImGui input
+     */
+	void handleImGuiInput();
+
+	/**
+     * Process a single network update cycle
+     */
+	void updateNetwork();
+
+	/**
+     * Draw the UI with ImGui
+     */
+	void drawUI();
+
+	/**
+     * Set up ImGui theme
+     */
+	void setupImGuiTheme();
+
+	/**
+     * Check if client is in connected state
+     * @return True if fully connected
+     */
+	bool isFullyConnected() const
+	{
+		return connectionState == ConnectionState::Connected;
+	}
+
 private:
-	// Network components
-	ENetHost* client = nullptr;
-	ENetPeer* server = nullptr;
+	//-------------------------------------------------------------------------
+	// PRIVATE IMPLEMENTATION
+	//-------------------------------------------------------------------------
+
+	// Core components
+	std::shared_ptr<NetworkManager> networkManager;
+	std::shared_ptr<AuthManager> authManager;
+	Logger logger;
 
 	// Player data
 	uint32_t myPlayerId = 0;
@@ -77,19 +159,28 @@ private:
 	std::unordered_map<uint32_t, PlayerInfo> otherPlayers;
 	std::mutex playersMutex;
 	float movementThreshold = 0.1f;
-	uint32_t positionUpdateRateMs = 100;
+	uint32_t positionUpdateRateMs = 50;
 	uint32_t lastPositionUpdateTime = 0;
 	bool useCompressedUpdates = true;
 
-	// Server connection info
-	std::string serverAddress = DEFAULT_SERVER;
-	uint16_t serverPort = DEFAULT_PORT;
-
 	// Status flags
-	bool isConnected = false;
-	bool isAuthenticated = false;
 	bool shouldExit = false;
 	bool reconnecting = false;
+	ConnectionState connectionState = ConnectionState::LoginScreen;
+
+	bool connectionInProgress = false;
+	float connectionProgress = 0.0f;
+
+	// Login UI components
+	char loginUsernameBuffer[64] = { 0 };
+	char loginPasswordBuffer[64] = { 0 };
+	std::string loginErrorMessage;
+	bool showPassword = false;
+	bool rememberCredentials = true;
+	bool autoLogin = false;
+
+	std::thread connectionThread;
+	std::atomic<bool> connectionThreadRunning{ false };
 
 	// UI and display
 	bool showDebug = false;
@@ -104,108 +195,89 @@ private:
 	std::deque<std::string> commandHistory;
 	int commandHistoryIndex = -1;
 
-	// Stats and performance
-	uint32_t packetsSent = 0;
-	uint32_t packetsReceived = 0;
-	uint32_t bytesSent = 0;
-	uint32_t bytesReceived = 0;
-	uint32_t lastPingTime = 0;
-	uint32_t pingMs = 0;
-	uint32_t lastNetworkActivity = 0;
-
-	// Utility objects
-	Logger logger;
-	HANDLE consoleHandle;
-
-	// Add these to the existing variables
-	uint32_t lastServerResponseTime = 0;     // Timestamp of last server response
-	uint32_t connectionCheckInterval = 1000; // Check connection every 1 second
-	uint32_t serverResponseTimeout = 5000;   // Consider connection lost after 5 seconds of no response
-	bool waitingForPingResponse = false;     // Flag to track ping responses
-	uint32_t lastPingSentTime = 0;           // When the last ping was sent
-
-	// Update timing
+	// Connection monitoring
 	uint32_t lastUpdateTime = 0;
 	uint32_t lastConnectionCheckTime = 0;
 
-public:
-	// Constructor
-	GameClient(const std::string& playerName = "", const std::string& password = "", bool debugMode = false);
+	// Utility objects
+	HANDLE consoleHandle;
 
-	// Destructor
-	~GameClient();
+	//-------------------------------------------------------------------------
+	// PRIVATE METHODS
+	//-------------------------------------------------------------------------
 
-	// Initialize the client
-	bool initialize();
+	/**
+     * Start connection to server
+     */
+	void startConnection();
 
-	// Connect to the server
-	bool connectToServer(const char* address, uint16_t port);
+	/**
+     * Draw login screen
+     */
+	void drawLoginScreen();
 
-	// Attempt to reconnect to server
-	bool reconnectToServer();
+	/**
+     * Initiate connection with current credentials
+     */
+	void initiateConnection();
 
-	// Authenticate with server
-	bool authenticate();
-
-	// Disconnect from the server
-	void disconnect(bool showMessage = true);
-
-	// Load saved credentials
-	void loadCredentials();
-
-	// Save credentials to file
-	void saveCredentials();
-
-	// Get credentials from user
-	void getUserCredentials();
-
-	// Send a packet to the server
-	void sendPacket(const std::string& message, bool reliable = true);
-
-	// Send a position update to the server
-	void sendPositionUpdate();
-
-	// Send ping to server to check connection
-	void sendPing();
-
-	void checkConnectionHealth();
-
-	void handleServerDisconnection();
-
-	// Send a chat message
+	/**
+     * Send a chat message
+     * @param message Message to send
+     */
 	void sendChatMessage(const std::string& message);
 
-	// Process a chat command
+	/**
+     * Process a chat command
+     * @param command Command to process
+     */
 	void processChatCommand(const std::string& command);
 
-	// Handle received packet
+	/**
+     * Handle received packet
+     * @param packet Packet to handle
+     */
 	void handlePacket(const ENetPacket* packet);
 
-	// Helper function to split strings (similar to the one in server)
+	/**
+     * Helper function to split strings
+     * @param str String to split
+     * @param delimiter Delimiter character
+     * @return Vector of split strings
+     */
 	std::vector<std::string> splitString(const std::string& str, char delimiter);
 
-	// Parse world state update
+	/**
+     * Parse world state update
+     * @param stateData State data to parse
+     */
 	void parseWorldState(const std::string& stateData);
 
-	// Add a chat message
+	/**
+     * Add a chat message
+     * @param sender Message sender
+     * @param content Message content
+     */
 	void addChatMessage(const std::string& sender, const std::string& content);
 
-	// Clear chat history
+	/**
+     * Clear chat history
+     */
 	void clearChatMessages();
 
-	void handleImGuiInput();
-
-	// Process a single network update cycle
-	void updateNetwork();
-
+	/**
+     * Draw network options UI
+     */
 	void drawNetworkOptionsUI();
 
-	// Draw the UI with ImGui
-	void drawUI();
+	/**
+     * Handle server disconnection
+     */
+	void handleServerDisconnection();
 
-	// Get current time in milliseconds
+	/**
+     * Get current time in milliseconds
+     * @return Current time in milliseconds
+     */
 	uint32_t getCurrentTimeMs();
-
-	// Set up ImGui theme
-	void setupImGuiTheme();
 };

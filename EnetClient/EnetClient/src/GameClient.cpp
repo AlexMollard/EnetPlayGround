@@ -1,8 +1,22 @@
 #include "GameClient.h"
 
+#include <algorithm>
+#include <cctype>
+#include <chrono>
+#include <cmath>
+#include <conio.h>
+#include <hello_imgui/hello_imgui.h>
+#include <iomanip>
+#include <iostream>
+#include <memory>
+#include <unordered_map>
+#include <vector>
+
+#include "Constants.h"
+
 // Constructor
 GameClient::GameClient(const std::string& playerName, const std::string& password, bool debugMode)
-      : myPlayerName(playerName), myPassword(password), logger(debugMode), lastNetworkActivity(getCurrentTimeMs())
+      : myPlayerName(playerName), myPassword(password), logger(debugMode), lastUpdateTime(getCurrentTimeMs())
 {
 	// Set up console
 	consoleHandle = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -11,16 +25,42 @@ GameClient::GameClient(const std::string& playerName, const std::string& passwor
 		logger.logError("Failed to get console handle");
 	}
 
+	// Create NetworkManager
+	networkManager = std::make_shared<NetworkManager>(logger);
+
+	// Create AuthManager
+	authManager = std::make_shared<AuthManager>(logger, networkManager);
+
 	// Try to load stored credentials if none provided
 	if (myPlayerName.empty() || myPassword.empty())
 	{
-		loadCredentials();
+		std::string loadedUsername, loadedPassword;
+		if (authManager->loadCredentials(loadedUsername, loadedPassword))
+		{
+			myPlayerName = loadedUsername;
+			myPassword = loadedPassword;
+
+			// Copy loaded credentials to the ImGui input buffers
+			if (!myPlayerName.empty())
+			{
+				strncpy_s(loginUsernameBuffer, myPlayerName.c_str(), sizeof(loginUsernameBuffer) - 1);
+			}
+			if (!myPassword.empty())
+			{
+				strncpy_s(loginPasswordBuffer, myPassword.c_str(), sizeof(loginPasswordBuffer) - 1);
+
+				// If we loaded credentials, potentially auto-login
+				autoLogin = true;
+			}
+		}
 	}
 
 	// Initialize update timing
-	lastUpdateTime = getCurrentTimeMs();
 	lastPositionUpdateTime = lastUpdateTime;
 	lastConnectionCheckTime = lastUpdateTime;
+
+	// Start in login screen state
+	connectionState = ConnectionState::LoginScreen;
 }
 
 // Destructor
@@ -35,25 +75,10 @@ bool GameClient::initialize()
 {
 	logger.log("Initializing client...");
 
-	// Initialize ENet
-	if (enet_initialize() != 0)
+	// Initialize NetworkManager
+	if (!networkManager->initialize())
 	{
-		logger.logError("Failed to initialize ENet");
-		return false;
-	}
-
-	// Create client host
-	client = enet_host_create(nullptr, // Create a client host (no bind address)
-	        1,                         // Allow 1 outgoing connection
-	        2,                         // Use 2 channels (reliable and unreliable)
-	        0,                         // Unlimited incoming bandwidth
-	        0                          // Unlimited outgoing bandwidth
-	);
-
-	if (client == nullptr)
-	{
-		logger.logError("Failed to create ENet client host");
-		enet_deinitialize();
+		logger.logError("Failed to initialize network manager");
 		return false;
 	}
 
@@ -61,495 +86,37 @@ bool GameClient::initialize()
 	return true;
 }
 
-// Connect to the server
-bool GameClient::connectToServer(const char* address = DEFAULT_SERVER, uint16_t port = DEFAULT_PORT)
-{
-	serverAddress = address;
-	serverPort = port;
-
-	// Create ENet address
-	ENetAddress enetAddress;
-	enet_address_set_host(&enetAddress, address);
-	enetAddress.port = port;
-
-	logger.log("Connecting to server at " + std::string(address) + ":" + std::to_string(port) + "...");
-
-	// Connect to the server
-	server = enet_host_connect(client, &enetAddress, 2, 0);
-
-	if (server == nullptr)
-	{
-		logger.logError("Failed to initiate connection to server");
-		return false;
-	}
-
-	// Wait for connection establishment
-	ENetEvent event;
-	if (enet_host_service(client, &event, 5000) > 0 && event.type == ENET_EVENT_TYPE_CONNECT)
-	{
-		isConnected = true;
-		lastNetworkActivity = getCurrentTimeMs();
-		logger.log("Connected to server at " + std::string(address) + ":" + std::to_string(port), true);
-
-		// Authenticate with server
-		if (!authenticate())
-		{
-			logger.logError("Authentication failed, disconnecting");
-			disconnect();
-			return false;
-		}
-
-		return true;
-	}
-
-	enet_peer_reset(server);
-	logger.logError("Connection to server failed (timeout)");
-	return false;
-}
-
-// Attempt to reconnect to server
-bool GameClient::reconnectToServer()
-{
-	if (isConnected)
-	{
-		disconnect(false);
-	}
-
-	logger.log("Attempting to reconnect to server...", true);
-	reconnecting = true;
-
-	for (int attempt = 1; attempt <= RECONNECT_ATTEMPTS; attempt++)
-	{
-		logger.log("Reconnection attempt " + std::to_string(attempt) + " of " + std::to_string(RECONNECT_ATTEMPTS));
-
-		if (connectToServer(serverAddress.c_str(), serverPort))
-		{
-			logger.log("Reconnection successful!", true);
-			reconnecting = false;
-			return true;
-		}
-
-		// Wait before next attempt
-		std::this_thread::sleep_for(std::chrono::seconds(2));
-	}
-
-	logger.logError("Failed to reconnect after " + std::to_string(RECONNECT_ATTEMPTS) + " attempts");
-	reconnecting = false;
-	return false;
-}
-
-// Authenticate with server
-bool GameClient::authenticate()
-{
-	if (!isConnected)
-	{
-		logger.logError("Cannot authenticate: not connected to server");
-		return false;
-	}
-
-	// Make sure we have credentials
-	if (myPlayerName.empty() || myPassword.empty())
-	{
-		getUserCredentials();
-	}
-
-	logger.log("Authenticating as user: " + myPlayerName);
-
-	// Send authentication message
-	std::string authMsg = "AUTH:" + myPlayerName + "," + myPassword;
-	sendPacket(authMsg, true);
-
-	// Wait for authentication response
-	ENetEvent event;
-	bool authResult = false;
-
-	// Wait for up to 5 seconds for authentication response
-	uint32_t startTime = getCurrentTimeMs();
-	const uint32_t AUTH_TIMEOUT_MS = 5000;
-
-	while (getCurrentTimeMs() - startTime < AUTH_TIMEOUT_MS)
-	{
-		while (enet_host_service(client, &event, 100) > 0)
-		{
-			switch (event.type)
-			{
-				case ENET_EVENT_TYPE_RECEIVE:
-				{
-					handlePacket(event.packet);
-
-					std::string message(reinterpret_cast<const char*>(event.packet->data), event.packet->dataLength);
-
-					logger.logNetworkEvent("Received during auth: " + message);
-
-					// Check for authentication response or welcome message
-					if (message.substr(0, 13) == "AUTH_RESPONSE:")
-					{
-						size_t commaPos = message.find(',', 13);
-						if (commaPos != std::string::npos)
-						{
-							std::string result = message.substr(13, commaPos - 13);
-
-							if (result == "success")
-							{
-								myPlayerId = std::stoi(message.substr(commaPos + 1));
-								logger.log("Authentication successful! Player ID: " + std::to_string(myPlayerId), true);
-								isAuthenticated = true;
-								authResult = true;
-							}
-							else
-							{
-								logger.logError("Authentication failed: " + message.substr(commaPos + 1));
-								isAuthenticated = false;
-								authResult = false;
-							}
-						}
-					}
-					else if (message.substr(0, 8) == "WELCOME:")
-					{
-						// Legacy protocol support
-						myPlayerId = std::stoi(message.substr(8));
-						logger.log("Received legacy welcome. Player ID: " + std::to_string(myPlayerId), true);
-						isAuthenticated = true;
-						authResult = true;
-					}
-
-					enet_packet_destroy(event.packet);
-
-					if (isAuthenticated || (!authResult && message.substr(0, 13) == "AUTH_RESPONSE:"))
-					{
-						return authResult;
-					}
-					break;
-				}
-
-				case ENET_EVENT_TYPE_DISCONNECT:
-				{
-					logger.logError("Server disconnected during authentication");
-					isConnected = false;
-					return false;
-				}
-
-				default:
-					break;
-			}
-		}
-	}
-
-	logger.logError("Authentication timed out");
-	return false;
-}
-
 // Disconnect from the server
 void GameClient::disconnect(bool showMessage)
 {
-	if (isConnected && server != nullptr)
-	{
-		if (showMessage)
-		{
-			logger.log("Disconnecting from server...", true);
-		}
+	// Let NetworkManager handle the actual disconnection
+	networkManager->disconnect(showMessage);
 
-		// If we're initiating the disconnect, send a proper disconnect packet
-		enet_peer_disconnect(server, 0);
-
-		// Wait for disconnect acknowledgment with timeout
-		ENetEvent event;
-		bool disconnected = false;
-		uint32_t disconnectStartTime = getCurrentTimeMs();
-
-		// Wait up to 3 seconds for clean disconnection
-		while (getCurrentTimeMs() - disconnectStartTime < 3000 && !disconnected)
-		{
-			while (enet_host_service(client, &event, 100) > 0)
-			{
-				if (event.type == ENET_EVENT_TYPE_DISCONNECT)
-				{
-					logger.log("Disconnection acknowledged by server");
-					disconnected = true;
-					break;
-				}
-				else if (event.type == ENET_EVENT_TYPE_RECEIVE)
-				{
-					enet_packet_destroy(event.packet);
-				}
-			}
-
-			if (disconnected)
-				break;
-		}
-
-		// Force disconnect if not acknowledged
-		if (!disconnected)
-		{
-			logger.log("Forcing disconnection after timeout");
-			enet_peer_reset(server);
-		}
-
-		server = nullptr;
-	}
-
-	// Always set these flags regardless of clean disconnection
-	isConnected = false;
-	isAuthenticated = false;
-	waitingForPingResponse = false;
-
-	// Clean up ENet resources if needed
-	if (client != nullptr)
-	{
-		enet_host_destroy(client);
-		client = nullptr;
-		enet_deinitialize();
-	}
-}
-
-// Load saved credentials
-void GameClient::loadCredentials()
-{
-	logger.log("Loading saved credentials...");
-
-	std::ifstream file(CREDENTIALS_FILE, std::ios::binary);
-	if (!file.is_open())
-	{
-		logger.log("No saved credentials found");
-		return;
-	}
-
-	try
-	{
-		// Read username
-		size_t nameLength = 0;
-		file.read(reinterpret_cast<char*>(&nameLength), sizeof(nameLength));
-
-		std::vector<char> nameBuffer(nameLength + 1, 0);
-		file.read(nameBuffer.data(), nameLength);
-		myPlayerName = std::string(nameBuffer.data(), nameLength);
-
-		// Read password
-		size_t passwordLength = 0;
-		file.read(reinterpret_cast<char*>(&passwordLength), sizeof(passwordLength));
-
-		std::vector<char> passwordBuffer(passwordLength + 1, 0);
-		file.read(passwordBuffer.data(), passwordLength);
-		myPassword = std::string(passwordBuffer.data(), passwordLength);
-
-		logger.log("Loaded credentials for user: " + myPlayerName);
-	}
-	catch (const std::exception& e)
-	{
-		logger.logError("Failed to load credentials: " + std::string(e.what()));
-		myPlayerName.clear();
-		myPassword.clear();
-	}
-
-	file.close();
-}
-
-// Save credentials to file
-void GameClient::saveCredentials()
-{
-	logger.log("Saving credentials...");
-
-	std::ofstream file(CREDENTIALS_FILE, std::ios::binary);
-	if (!file.is_open())
-	{
-		logger.logError("Failed to save credentials: couldn't open file");
-		return;
-	}
-
-	try
-	{
-		// Write username
-		size_t nameLength = myPlayerName.length();
-		file.write(reinterpret_cast<const char*>(&nameLength), sizeof(nameLength));
-		file.write(myPlayerName.c_str(), nameLength);
-
-		// Write password
-		size_t passwordLength = myPassword.length();
-		file.write(reinterpret_cast<const char*>(&passwordLength), sizeof(passwordLength));
-		file.write(myPassword.c_str(), passwordLength);
-
-		logger.log("Credentials saved successfully");
-	}
-	catch (const std::exception& e)
-	{
-		logger.logError("Failed to save credentials: " + std::string(e.what()));
-	}
-
-	file.close();
-}
-
-// Get credentials from user
-void GameClient::getUserCredentials()
-{
-	logger.log("Please enter your credentials:", true);
-
-	std::cout << "\nUsername: ";
-	std::getline(std::cin, myPlayerName);
-
-	std::cout << "Password: ";
-	std::getline(std::cin, myPassword);
-
-	// Save for next time
-	saveCredentials();
-}
-
-// Send a packet to the server
-void GameClient::sendPacket(const std::string& message, bool reliable)
-{
-	if (!isConnected || server == nullptr)
-	{
-		logger.logError("Cannot send packet: not connected to server");
-		return;
-	}
-
-	ENetPacket* packet = enet_packet_create(message.c_str(), message.length(), reliable ? ENET_PACKET_FLAG_RELIABLE : 0);
-
-	if (enet_peer_send(server, 0, packet) == 0)
-	{
-		// Update stats
-		packetsSent++;
-		bytesSent += message.length();
-		lastNetworkActivity = getCurrentTimeMs();
-
-		// Log packet (but don't spam logs with position updates)
-		if (message.substr(0, 9) != "POSITION:")
-		{
-			logger.logNetworkEvent("Sent: " + message);
-		}
-	}
-	else
-	{
-		logger.logError("Failed to send packet: " + message);
-		enet_packet_destroy(packet);
-	}
-}
-
-// Send a position update to the server
-void GameClient::sendPositionUpdate()
-{
-	if (!isConnected || !isAuthenticated)
-		return;
-
-	uint32_t currentTime = getCurrentTimeMs();
-
-	// Throttle update rate - don't send updates too frequently
-	if (currentTime - lastPositionUpdateTime < positionUpdateRateMs)
-		return;
-
-	// Only send if position has changed significantly
-	float moveDistance = std::sqrt(pow(myPosition.x - lastSentPosition.x, 2) + pow(myPosition.y - lastSentPosition.y, 2) + pow(myPosition.z - lastSentPosition.z, 2));
-
-	if (moveDistance < movementThreshold)
-		return;
-
-	// Prepare position update message
-	std::string positionMsg;
-
-	if (useCompressedUpdates)
-	{
-		// Delta compression: Send only the coordinates that changed significantly
-		positionMsg = "MOVE_DELTA:";
-		bool addedCoordinate = false;
-
-		if (std::abs(myPosition.x - lastSentPosition.x) >= movementThreshold)
-		{
-			positionMsg += "x" + std::to_string(myPosition.x);
-			addedCoordinate = true;
-		}
-
-		if (std::abs(myPosition.y - lastSentPosition.y) >= movementThreshold)
-		{
-			if (addedCoordinate)
-				positionMsg += ",";
-			positionMsg += "y" + std::to_string(myPosition.y);
-			addedCoordinate = true;
-		}
-
-		if (std::abs(myPosition.z - lastSentPosition.z) >= movementThreshold)
-		{
-			if (addedCoordinate)
-				positionMsg += ",";
-			positionMsg += "z" + std::to_string(myPosition.z);
-		}
-	}
-	else
-	{
-		// Full position update (fallback method)
-		positionMsg = "POSITION:" + std::to_string(myPosition.x) + "," + std::to_string(myPosition.y) + "," + std::to_string(myPosition.z);
-	}
-
-	// Use unreliable packets for position updates
-	sendPacket(positionMsg, false);
-	lastSentPosition = myPosition;
-	lastPositionUpdateTime = currentTime;
-}
-
-// Send ping to server to check connection
-void GameClient::sendPing()
-{
-	if (!isConnected)
-		return;
-
-	uint32_t currentTime = getCurrentTimeMs();
-
-	// Send ping at regular intervals
-	if (currentTime - lastPingTime >= PING_INTERVAL_MS)
-	{
-		lastPingTime = currentTime;
-		lastPingSentTime = currentTime;
-		waitingForPingResponse = true;
-		std::string pingMsg = "PING:" + std::to_string(currentTime);
-		sendPacket(pingMsg);
-		logger.log("Sent ping at timestamp " + std::to_string(currentTime));
-	}
-
-	// Check for connection timeout (no ping response)
-	if (waitingForPingResponse && currentTime - lastPingSentTime > serverResponseTimeout)
-	{
-		logger.logError("Ping response timeout - Server may have disconnected");
-		handleServerDisconnection();
-	}
-}
-
-void GameClient::checkConnectionHealth()
-{
-	if (!isConnected || reconnecting)
-		return;
-
-	uint32_t currentTime = getCurrentTimeMs();
-
-	// Check if we've received any responses from server recently
-	if (currentTime - lastNetworkActivity > serverResponseTimeout)
-	{
-		logger.logError("No server activity for " + std::to_string(serverResponseTimeout / 1000) + " seconds");
-		handleServerDisconnection();
-	}
+	// Update client state
+	connectionState = ConnectionState::LoginScreen;
 }
 
 void GameClient::handleServerDisconnection()
 {
-	isConnected = false;
-	isAuthenticated = false;
-
-	logger.logError("Detected server disconnection");
+	connectionState = ConnectionState::LoginScreen;
 	addChatMessage("System", "Lost connection to server");
 
 	// Try to reconnect if not exiting
-	if (!shouldExit && !reconnecting)
+	if (!shouldExit && !reconnecting && autoLogin)
 	{
 		addChatMessage("System", "Attempting to reconnect...");
-		reconnectToServer();
+		networkManager->reconnectToServer();
 	}
 }
 
 // Send a chat message
 void GameClient::sendChatMessage(const std::string& message)
 {
-	if (!isConnected || !isAuthenticated || message.empty())
+	if (!authManager->isAuthenticated() || message.empty())
 		return;
 
 	std::string chatMsg = "CHAT:" + message;
-	sendPacket(chatMsg);
+	networkManager->sendPacket(chatMsg);
 
 	// Also add to local chat
 	addChatMessage("You", message);
@@ -607,15 +174,17 @@ void GameClient::processChatCommand(const std::string& command)
 		else if (cmd == "reconnect")
 		{
 			addChatMessage("System", "Attempting to reconnect...");
-			reconnectToServer();
+			// Use the NetworkManager instead of calling reconnectToServer directly
+			networkManager->reconnectToServer();
 			return;
 		}
 
 		// Send all other commands to the server
-		if (isConnected && isAuthenticated)
+		if (networkManager->isConnectedToServer() && authManager->isAuthenticated())
 		{
 			std::string commandMsg = "COMMAND:" + command.substr(1); // Remove the leading '/'
-			sendPacket(commandMsg, true);
+			// Use the NetworkManager to send packets
+			networkManager->sendPacket(commandMsg, true);
 			logger.log("Sent command to server: " + commandMsg);
 		}
 		else
@@ -633,22 +202,35 @@ void GameClient::processChatCommand(const std::string& command)
 // Handle received packet
 void GameClient::handlePacket(const ENetPacket* packet)
 {
-	// Update connection monitoring
-	lastServerResponseTime = getCurrentTimeMs();
-	lastNetworkActivity = lastServerResponseTime;
-
-	// If we received any packet, we know the server is still responding
-	if (waitingForPingResponse)
-	{
-		waitingForPingResponse = false;
-	}
-
-	// Update stats
-	packetsReceived++;
-	bytesReceived += packet->dataLength;
-	lastNetworkActivity = getCurrentTimeMs();
-
 	std::string message(reinterpret_cast<const char*>(packet->data), packet->dataLength);
+
+	// First, let AuthManager check if this is an auth response
+	bool wasAuthPacket = authManager->processAuthResponse(
+	        packet->data,
+	        packet->dataLength,
+	        // Auth success callback
+	        [this](uint32_t playerId)
+	        {
+		        this->myPlayerId = playerId;
+		        connectionState = ConnectionState::Connected;
+		        addChatMessage("System", "Authentication successful! Welcome to the server.");
+
+		        // Lets get the player position from the server
+		        std::string request = "POSITION:";
+		        networkManager->sendPacket(request);
+	        },
+	        // Auth failed callback
+	        [this](const std::string& errorMsg)
+	        {
+		        loginErrorMessage = "Authentication failed: " + errorMsg;
+		        connectionState = ConnectionState::LoginScreen;
+	        });
+
+	// If already handled by AuthManager, we're done
+	if (wasAuthPacket)
+	{
+		return;
+	}
 
 	// Don't log position updates to avoid spam
 	if (message.substr(0, 12) != "WORLD_STATE:" && message.substr(0, 5) != "PONG:")
@@ -657,22 +239,28 @@ void GameClient::handlePacket(const ENetPacket* packet)
 	}
 
 	// Handle different message types
-	if (message.substr(0, 13) == "AUTH_RESPONSE:")
-	{
-		// Already handled in authenticate method
-		return;
-	}
-	else if (message.substr(0, 8) == "WELCOME:")
-	{
-		// Legacy protocol - handle welcome message
-		myPlayerId = std::stoi(message.substr(8));
-		logger.log("Received player ID: " + std::to_string(myPlayerId));
-		isAuthenticated = true;
-	}
-	else if (message.substr(0, 12) == "WORLD_STATE:")
+	if (message.substr(0, 12) == "WORLD_STATE:")
 	{
 		// Handle world state update
 		parseWorldState(message.substr(12));
+	}
+	else if (message.substr(0, 9) == "POSITION:")
+	{
+		// format: POSITION:x18.254965,y0.000000,z-22.989958
+		// Process chat message from server
+		//size_t colonPos = message.find(':', 5);
+		//if (colonPos != std::string::npos)
+		//{
+		//	std::string x = message.substr(colonPos + 1, message.find(',', colonPos + 1) - colonPos - 1);
+		//	std::string y = message.substr(message.find(',', colonPos + 1) + 1, message.find(',', message.find(',', colonPos + 1) + 1) - message.find(',', colonPos + 1) - 1);
+		//	std::string z = message.substr(message.find(',', message.find(',', colonPos + 1) + 1) + 1);
+		//
+		//	logger.log("Received position update: X=" + x + " Y=" + y + " Z=" + z);
+
+		//	myPosition.x = std::stof(x);
+		//	myPosition.y = std::stof(y);
+		//	myPosition.z = std::stof(z);
+		//}
 	}
 	else if (message.substr(0, 5) == "CHAT:")
 	{
@@ -691,17 +279,7 @@ void GameClient::handlePacket(const ENetPacket* packet)
 	}
 	else if (message.substr(0, 5) == "PONG:")
 	{
-		// Calculate ping time
-		try
-		{
-			uint32_t sentTime = std::stoul(message.substr(5));
-			pingMs = getCurrentTimeMs() - sentTime;
-			waitingForPingResponse = false; // Mark that we got a response
-		}
-		catch (const std::exception& e)
-		{
-			logger.logError("Failed to parse PONG message: " + std::string(e.what()));
-		}
+		// This is now handled by NetworkManager
 	}
 	else if (message.substr(0, 7) == "SYSTEM:")
 	{
@@ -759,8 +337,6 @@ std::vector<std::string> GameClient::splitString(const std::string& str, char de
 // Parse world state update
 void GameClient::parseWorldState(const std::string& stateData)
 {
-	std::lock_guard<std::mutex> lock(playersMutex);
-
 	// Mark all players for potential removal
 	for (auto& pair: otherPlayers)
 	{
@@ -871,8 +447,6 @@ void GameClient::parseWorldState(const std::string& stateData)
 // Add a chat message
 void GameClient::addChatMessage(const std::string& sender, const std::string& content)
 {
-	std::lock_guard<std::mutex> lock(chatMutex);
-
 	ChatMessage msg;
 	msg.sender = sender;
 	msg.content = content;
@@ -890,7 +464,6 @@ void GameClient::addChatMessage(const std::string& sender, const std::string& co
 // Clear chat history
 void GameClient::clearChatMessages()
 {
-	std::lock_guard<std::mutex> lock(chatMutex);
 	chatMessages.clear();
 	addChatMessage("System", "Chat history cleared");
 }
@@ -899,6 +472,21 @@ void GameClient::handleImGuiInput()
 {
 	// Get ImGui IO to check key states
 	ImGuiIO& io = ImGui::GetIO();
+
+	// Only process input when we're connected or in the login screen
+	if (connectionState == ConnectionState::LoginScreen)
+	{
+		// In login screen, ESC should exit the application
+		if (ImGui::IsKeyPressed(ImGuiKey_Escape, false))
+		{
+			shouldExit = true;
+		}
+
+		// Other login-specific input handling would go here
+		return;
+	}
+
+	// Below only applies to connected state
 
 	// First, handle global keys that work regardless of chat focus
 	if (ImGui::IsKeyPressed(ImGuiKey_Escape, false))
@@ -938,8 +526,8 @@ void GameClient::handleImGuiInput()
 		return;                    // Don't process movement in the same frame as entering chat
 	}
 
-	// Only process movement keys when not in chat mode
-	if (!chatFocused && !io.WantTextInput)
+	// Only process movement keys when not in chat mode and when fully connected
+	if (!chatFocused && !io.WantTextInput && connectionState == ConnectionState::Connected)
 	{
 		// Get elapsed time since last frame for smooth movement
 		uint32_t currentTime = getCurrentTimeMs();
@@ -997,66 +585,108 @@ void GameClient::handleImGuiInput()
 			processChatCommand("/reconnect");
 		}
 	}
-
-	// Handle command history navigation in chat mode
-	// This is handled separately in the chat input section of drawUI()
 }
 
-// This method is updated in the implementation above
+// Updated to synchronous connection
+void GameClient::startConnection()
+{
+	connectionProgress = 0.0f;
+	connectionState = ConnectionState::Connecting;
+	loginErrorMessage.clear();
+
+	// Add a system message to chat for better UX
+	addChatMessage("System", "Connecting to server at " + networkManager->getServerAddress() + ":" + std::to_string(networkManager->getServerPort()) + "...");
+
+	// Update state
+	connectionProgress = 0.1f;
+
+	// Ensure NetworkManager is initialized first
+	if (!networkManager->clientSetup())
+	{
+		if (!initialize())
+		{
+			loginErrorMessage = "Failed to initialize client";
+			connectionState = ConnectionState::LoginScreen;
+			return;
+		}
+	}
+
+	// Connect to server using NetworkManager
+	bool connected = networkManager->connectToServer(networkManager->getServerAddress().c_str(), networkManager->getServerPort());
+	if (!connected)
+	{
+		loginErrorMessage = "Failed to connect to server";
+		connectionState = ConnectionState::LoginScreen;
+		return;
+	}
+
+	connectionProgress = 0.5f;
+
+	// Start authentication
+	bool authStarted = authManager->authenticate(
+	        myPlayerName,
+	        myPassword,
+	        rememberCredentials,
+	        [this](uint32_t playerId)
+	        {
+		        this->myPlayerId = playerId;
+		        connectionState = ConnectionState::Connected;
+		        addChatMessage("System", "Authentication successful! Welcome to the server.");
+	        },
+	        [this](const std::string& errorMsg)
+	        {
+		        loginErrorMessage = "Authentication failed: " + errorMsg;
+		        connectionState = ConnectionState::LoginScreen;
+		        networkManager->disconnect(false);
+	        });
+
+	if (!authStarted)
+	{
+		networkManager->disconnect(false);
+		loginErrorMessage = "Failed to start authentication";
+		connectionState = ConnectionState::LoginScreen;
+	}
+	else
+	{
+		connectionState = ConnectionState::Authenticating;
+	}
+}
 
 // Process a single network update cycle
 void GameClient::updateNetwork()
 {
-	if (!isConnected || client == nullptr)
+	// Only process network updates if connected or connecting
+	if (connectionState == ConnectionState::LoginScreen)
 	{
 		return;
 	}
 
-	// Process any pending events
-	ENetEvent event;
-	while (enet_host_service(client, &event, 0) > 0)
-	{
-		switch (event.type)
-		{
-			case ENET_EVENT_TYPE_RECEIVE:
-				handlePacket(event.packet);
-				enet_packet_destroy(event.packet);
-				break;
-
-			case ENET_EVENT_TYPE_DISCONNECT:
-				logger.logError("Disconnected from server");
-				isConnected = false;
-
-				// Try to reconnect if not exiting
-				if (!shouldExit && !reconnecting)
-				{
-					reconnectToServer();
-				}
-				break;
-
-			default:
-				break;
-		}
-	}
-
+	// Get current time for delta calculations
 	uint32_t currentTime = getCurrentTimeMs();
 
-	// Update timing flags
-	bool shouldUpdatePosition = (currentTime - lastPositionUpdateTime >= MOVEMENT_UPDATE_RATE_MS);
-	bool shouldCheckConnection = (currentTime - lastConnectionCheckTime >= connectionCheckInterval);
+	// Use NetworkManager to process packets and handle events
+	networkManager->update(
+	        // Position update callback
+	        [this]()
+	        {
+		        uint32_t currentTime = getCurrentTimeMs();
+		        if (currentTime - lastPositionUpdateTime >= positionUpdateRateMs && authManager->isAuthenticated())
+		        {
+			        networkManager->sendPositionUpdate(myPosition.x, myPosition.y, myPosition.z, lastSentPosition.x, lastSentPosition.y, lastSentPosition.z, useCompressedUpdates, movementThreshold);
+			        lastSentPosition = myPosition;
+			        lastPositionUpdateTime = currentTime;
+		        }
+	        },
+	        // Packet handler callback
+	        [this](const ENetPacket* packet) { handlePacket(packet); },
+	        // Disconnect callback
+	        [this]() { handleServerDisconnection(); });
 
-	// Send position updates if it's time
-	if (shouldUpdatePosition && isAuthenticated)
+	// Connection health checks at regular intervals
+	if (currentTime - lastConnectionCheckTime >= 1000)
 	{
-		sendPositionUpdate();
-		lastPositionUpdateTime = currentTime;
-	}
-
-	// Send ping and check connection if it's time
-	if (shouldCheckConnection)
-	{
-		sendPing();
-		checkConnectionHealth();
+		networkManager->sendPing();
+		networkManager->checkConnectionHealth([this]() { handleServerDisconnection(); });
 		lastConnectionCheckTime = currentTime;
 	}
 }
@@ -1131,6 +761,169 @@ void GameClient::drawNetworkOptionsUI()
 	}
 }
 
+void GameClient::initiateConnection()
+{
+	// Update credentials from input fields
+	myPlayerName = loginUsernameBuffer;
+	myPassword = loginPasswordBuffer;
+
+	// Validate credentials
+	if (myPlayerName.empty() || myPassword.empty())
+	{
+		loginErrorMessage = "Please enter both username and password";
+		return;
+	}
+
+	// Clear previous error message
+	loginErrorMessage.clear();
+
+	// Start connection
+	startConnection();
+}
+
+void GameClient::drawLoginScreen()
+{
+	// Center the login window on screen
+	ImGuiIO& io = ImGui::GetIO();
+	ImVec2 windowSize = ImVec2(400, 350); // Using original size to ensure no scrolling
+	ImVec2 windowPos = ImVec2((io.DisplaySize.x - windowSize.x) * 0.5f, (io.DisplaySize.y - windowSize.y) * 0.5f);
+
+	// Set window position and size
+	ImGui::SetNextWindowPos(windowPos, ImGuiCond_Always);
+	ImGui::SetNextWindowSize(windowSize, ImGuiCond_Always);
+
+	// Start the window - using game's existing style
+	ImGui::Begin("Login", nullptr, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove);
+
+	// Calculate content width for centering
+	const float contentWidth = ImGui::GetContentRegionAvail().x;
+
+	// Game title with proper centering
+	ImGui::PushFont(ImGui::GetIO().Fonts->Fonts[0]); // Default font
+
+	// Center the title text properly
+	ImVec2 titleSize = ImGui::CalcTextSize("MMO CLIENT");
+	ImGui::SetCursorPosX((contentWidth - titleSize.x) * 0.5f);
+	ImGui::Text("MMO CLIENT");
+	ImGui::PopFont();
+
+	// Center version text properly
+	char versionText[64];
+	snprintf(versionText, sizeof(versionText), "Version %s", CLIENT_VERSION);
+	ImVec2 versionSize = ImGui::CalcTextSize(versionText);
+	ImGui::SetCursorPosX((contentWidth - versionSize.x) * 0.5f);
+	ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "%s", versionText);
+
+	// Separator with proper spacing
+	ImGui::Separator();
+	ImGui::Spacing();
+
+	// If connection is in progress, show connecting indicator
+	if (connectionState == ConnectionState::Connecting || connectionState == ConnectionState::Authenticating)
+	{
+		// Center text
+		const char* connectingText = "Connecting to server...";
+		ImVec2 textSize = ImGui::CalcTextSize(connectingText);
+		ImGui::SetCursorPosX((contentWidth - textSize.x) * 0.5f);
+		ImGui::Text("%s", connectingText);
+
+		// Progress bar
+		const float progressBarWidth = contentWidth * 0.9f;
+		ImGui::SetCursorPosX((contentWidth - progressBarWidth) * 0.5f);
+		ImGui::ProgressBar(connectionProgress, ImVec2(progressBarWidth, 20), "");
+		ImGui::Spacing();
+
+		// Cancel button
+		const float buttonWidth = 120.0f;
+		ImGui::SetCursorPosX((contentWidth - buttonWidth) * 0.5f);
+		if (ImGui::Button("Cancel", ImVec2(buttonWidth, 30)))
+		{
+			disconnect(false);
+			connectionProgress = 0.0f;
+			loginErrorMessage = "Connection canceled by user";
+		}
+	}
+	else
+	{
+		// Login form with better alignment
+		const float labelWidth = 80.0f; // Width for labels
+
+		// Server selection with consistent alignment
+		ImGui::AlignTextToFramePadding();
+		ImGui::Text("Server:");
+		ImGui::SameLine();
+		ImGui::SetNextItemWidth(contentWidth - labelWidth);
+		char serverBuf[128];
+		strncpy_s(serverBuf, networkManager->getServerAddress().c_str(), sizeof(serverBuf) - 1);
+		if (ImGui::InputText("##Server", serverBuf, sizeof(serverBuf)))
+		{
+			networkManager->setServerAddress(serverBuf);
+		}
+		ImGui::Spacing();
+
+		// Username field with consistent alignment
+		ImGui::AlignTextToFramePadding();
+		ImGui::Text("Username:");
+		ImGui::SameLine();
+		ImGui::SetNextItemWidth(contentWidth - labelWidth);
+		ImGui::InputText("##Username", loginUsernameBuffer, sizeof(loginUsernameBuffer));
+
+		// Password field with better alignment
+		ImGui::AlignTextToFramePadding();
+		ImGui::Text("Password:");
+		ImGui::SameLine();
+		ImGuiInputTextFlags passwordFlags = showPassword ? 0 : ImGuiInputTextFlags_Password;
+		ImGui::SetNextItemWidth(contentWidth - labelWidth - 60);
+		ImGui::InputText("##Password", loginPasswordBuffer, sizeof(loginPasswordBuffer), passwordFlags);
+		ImGui::SameLine();
+		if (ImGui::Button(showPassword ? "Hide" : "Show", ImVec2(50, 0)))
+		{
+			showPassword = !showPassword;
+		}
+		ImGui::Spacing();
+
+		// Remember credentials with proper alignment
+		ImGui::Checkbox("Remember credentials", &rememberCredentials);
+		ImGui::Spacing();
+
+		// Error message with better styling
+		if (!loginErrorMessage.empty())
+		{
+			ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.3f, 0.3f, 1.0f));
+
+			// Measure text to decide on centering or wrapping
+			ImVec2 textSize = ImGui::CalcTextSize(loginErrorMessage.c_str());
+			if (textSize.x > contentWidth - 20.0f)
+			{
+				// For long messages, use wrapping
+				ImGui::PushTextWrapPos(ImGui::GetCursorPos().x + contentWidth);
+				ImGui::TextWrapped("%s", loginErrorMessage.c_str());
+				ImGui::PopTextWrapPos();
+			}
+			else
+			{
+				// For short messages, center
+				ImGui::SetCursorPosX((contentWidth - textSize.x) * 0.5f);
+				ImGui::Text("%s", loginErrorMessage.c_str());
+			}
+
+			ImGui::PopStyleColor();
+			ImGui::Spacing();
+		}
+
+		// Connect button
+		const float buttonWidth = 120.0f;
+		ImGui::SetCursorPosX((contentWidth - buttonWidth) * 0.5f);
+		if (ImGui::Button("Connect", ImVec2(buttonWidth, 30)))
+		{
+			// Initiate connection
+			initiateConnection();
+		}
+	}
+
+	ImGui::End();
+}
+
 // Draw the UI with ImGui
 void GameClient::drawUI()
 {
@@ -1143,385 +936,437 @@ void GameClient::drawUI()
 
 	ImGui::Begin("MMO Client", nullptr, window_flags);
 
-	// Set up colors and styles for a more modern look
-	ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.20f, 0.19f, 0.19f, 1.00f));        // Light background color
-	ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0.25f, 0.24f, 0.24f, 1.00f)); // Very light background
-	ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImVec4(0.93f, 0.90f, 0.85f, 1.00f));  // Primary color (#EEE5DA)
-
-	// Create a nice header section with better styling
-	ImGui::PushFont(ImGui::GetIO().Fonts->Fonts[0]); // Use default font but could be larger font if available
-	ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(10, 10));
-
-	// Header section with status
+	// Check connection state and draw appropriate UI
+	if ((connectionState == ConnectionState::LoginScreen || connectionState == ConnectionState::Connecting || connectionState == ConnectionState::Authenticating) && !connectionInProgress)
 	{
-		ImGui::BeginChild("HeaderSection", ImVec2(ImGui::GetContentRegionAvail().x, 60), true, ImGuiWindowFlags_NoScrollbar);
-
-		// Left side - title and version
-		ImGui::Text("MMO Client v%s", CLIENT_VERSION);
-
-		// Right side - connection status
-		float statusWidth = 120;
-		ImGui::SameLine(ImGui::GetContentRegionAvail().x - statusWidth);
-
-		ImGui::PushStyleColor(ImGuiCol_Text, isConnected ? ImVec4(0.2f, 0.8f, 0.2f, 1.0f) : ImVec4(0.8f, 0.2f, 0.2f, 1.0f));
-		ImGui::TextUnformatted(isConnected ? ":D CONNECTED" : "X DISCONNECTED");
-		ImGui::PopStyleColor();
-
-		// Player info below the header
-		ImGui::Text("Player: %s (ID: %u)", myPlayerName.c_str(), myPlayerId);
-		ImGui::SameLine(ImGui::GetContentRegionAvail().x - 250);
-		ImGui::Text("Position: X=%.1f Y=%.1f Z=%.1f", myPosition.x, myPosition.y, myPosition.z);
-
-		ImGui::EndChild();
+		drawLoginScreen();
 	}
-
-	ImGui::PopStyleVar(); // ItemSpacing
-	ImGui::PopFont();
-
-	// Layout with 3 panels using columns
-	ImGui::Columns(3, "MainLayout", false);
-
-	// Left panel - Player list
+	else
 	{
-		ImGui::BeginChild("PlayersPanel", ImVec2(ImGui::GetColumnWidth(), ImGui::GetContentRegionAvail().y - 30), true);
+		// Create a nice header section with better styling
+		ImGui::PushFont(ImGui::GetIO().Fonts->Fonts[0]); // Use default font but could be larger font if available
+		ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(10, 10));
 
-		ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.93f, 0.90f, 0.85f, 1.00f)); // Primary color (#EEE5DA)
-		ImGui::TextUnformatted("PLAYERS ONLINE");
-		ImGui::PopStyleColor();
-
-		ImGui::Separator();
-
-		// Network stats display if enabled
-		if (showStats)
+		// Header section with status
 		{
-			ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.80f, 0.78f, 0.74f, 1.00f)); // Muted primary color
-			ImGui::TextWrapped("Ping: %ums | Packets: %u/%u | Data: %u/%u bytes", pingMs, packetsSent, packetsReceived, bytesSent, bytesReceived);
+			ImGui::BeginChild("HeaderSection", ImVec2(ImGui::GetContentRegionAvail().x, 60), true, ImGuiWindowFlags_NoScrollbar);
+
+			// Left side - title and version
+			ImGui::Text("MMO Client v%s", CLIENT_VERSION);
+
+			// Right side - connection status
+			float statusWidth = 150;
+			ImGui::SameLine(ImGui::GetContentRegionAvail().x - statusWidth);
+
+			// Show different status based on connection state
+			ImVec4 statusColor;
+			const char* statusText;
+
+			if (connectionInProgress)
+			{
+				statusColor = ImVec4(0.8f, 0.8f, 0.2f, 1.0f);
+				statusText = "CONNECTING...";
+			}
+			else
+			{
+				switch (connectionState)
+				{
+					case ConnectionState::Connecting:
+						statusColor = ImVec4(0.8f, 0.8f, 0.2f, 1.0f);
+						statusText = "CONNECTING...";
+						break;
+					case ConnectionState::Authenticating:
+						statusColor = ImVec4(0.8f, 0.8f, 0.2f, 1.0f);
+						statusText = "AUTHENTICATING...";
+						break;
+					case ConnectionState::Connected:
+						statusColor = ImVec4(0.2f, 0.8f, 0.2f, 1.0f);
+						statusText = "CONNECTED";
+						break;
+					default:
+						statusColor = ImVec4(0.8f, 0.2f, 0.2f, 1.0f);
+						statusText = "DISCONNECTED";
+						break;
+				}
+			}
+
+			ImGui::PushStyleColor(ImGuiCol_Text, statusColor);
+			ImGui::TextUnformatted(statusText);
+			ImGui::PopStyleColor();
+
+			// Player info below the header
+			ImGui::Text("Player: %s (ID: %u)", myPlayerName.c_str(), myPlayerId);
+			ImGui::SameLine(ImGui::GetContentRegionAvail().x - 250);
+			ImGui::Text("Position: X=%.1f Y=%.1f Z=%.1f", myPosition.x, myPosition.y, myPosition.z);
+
+			ImGui::EndChild();
+		}
+
+		ImGui::PopStyleVar(); // ItemSpacing
+		ImGui::PopFont();
+
+		// Layout with 3 panels using columns
+		ImGui::Columns(3, "MainLayout", false);
+
+		// Left panel - Player list
+		{
+			ImGui::BeginChild("PlayersPanel", ImVec2(ImGui::GetColumnWidth(), ImGui::GetContentRegionAvail().y - 60), true);
+			ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.93f, 0.90f, 0.85f, 1.00f)); // Primary color (#EEE5DA)
+			ImGui::TextUnformatted("PLAYERS ONLINE");
 			ImGui::PopStyleColor();
 			ImGui::Separator();
-		}
 
-		// Display other players with better formatting
-		{
-			std::lock_guard<std::mutex> lock(playersMutex);
-			if (otherPlayers.empty())
+			// Network stats display if enabled
+			if (showStats)
 			{
-				ImGui::TextColored(ImVec4(0.80f, 0.78f, 0.74f, 1.00f), "No other players online");
+				ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.80f, 0.78f, 0.74f, 1.00f)); // Muted primary color
+				ImGui::TextWrapped("Ping: %ums | Packets: %u/%u | Data: %u/%u bytes", networkManager->getPing(), networkManager->getPacketsSent(), networkManager->getPacketsReceived(), networkManager->getBytesSent(), networkManager->getBytesReceived());
+				ImGui::PopStyleColor();
+				ImGui::Separator();
 			}
-			else
+
+			// Display other players
 			{
-				for (const auto& pair: otherPlayers)
+				const float listHeight = ImGui::GetContentRegionAvail().y - 340; // Reserve space for the map
+				ImGui::BeginChild("PlayersList", ImVec2(ImGui::GetContentRegionAvail().x, listHeight), false);
+
+				std::lock_guard<std::mutex> lock(playersMutex);
+				if (otherPlayers.empty())
 				{
-					const PlayerInfo& player = pair.second;
-
-					// Show a colored indicator and player name with ID
-					ImGui::TextColored(ImVec4(0.4f, 0.8f, 0.4f, 1.0f), "●"); // Keep green for player indicator
-					ImGui::SameLine();
-					ImGui::TextUnformatted(player.name.c_str());
-					ImGui::SameLine();
-					ImGui::TextColored(ImVec4(0.70f, 0.68f, 0.64f, 1.00f), "(ID: %u)", player.id);
-
-					// Show position indented
-					ImGui::Indent(10);
-					ImGui::TextColored(ImVec4(0.80f, 0.78f, 0.74f, 1.00f), "Position: %.1f, %.1f, %.1f", player.position.x, player.position.y, player.position.z);
-					ImGui::Unindent(10);
+					ImGui::TextColored(ImVec4(0.80f, 0.78f, 0.74f, 1.00f), "No other players online");
 				}
-			}
-		}
-
-		ImGui::EndChild();
-	}
-	ImGui::NextColumn();
-
-	// Middle panel - Chat
-	{
-		ImGui::BeginChild("ChatPanel", ImVec2(ImGui::GetColumnWidth(), ImGui::GetContentRegionAvail().y - 30), true);
-
-		ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.93f, 0.90f, 0.85f, 1.00f)); // Primary color (#EEE5DA)
-		ImGui::TextUnformatted("CHAT");
-		ImGui::PopStyleColor();
-
-		ImGui::Separator();
-
-		// Chat message display with scrolling
-		ImGui::BeginChild("ChatMessages", ImVec2(0, -ImGui::GetFrameHeightWithSpacing() - 10), true);
-		{
-			std::lock_guard<std::mutex> chatLock(chatMutex);
-			for (const auto& msg: chatMessages)
-			{
-				// Format timestamp (could be improved)
-				std::string timeStr = "[" + std::to_string(msg.timestamp) + "]";
-
-				// Format sender with different colors based on type
-				ImVec4 senderColor;
-				if (msg.sender == "System" || msg.sender == "Server")
-					senderColor = ImVec4(0.85f, 0.75f, 0.55f, 1.0f); // Gold-ish for system
-				else if (msg.sender == "You")
-					senderColor = ImVec4(0.2f, 0.8f, 0.2f, 1.0f); // Keep green for self
 				else
-					senderColor = ImVec4(0.93f, 0.90f, 0.85f, 1.0f); // Primary color for others
-
-				// Print timestamp in muted color
-				ImGui::TextColored(ImVec4(0.70f, 0.68f, 0.64f, 1.00f), "%s", timeStr.c_str());
-				ImGui::SameLine();
-
-				// Print sender name with color
-				ImGui::TextColored(senderColor, "%s:", msg.sender.c_str());
-				ImGui::SameLine();
-
-				// Print message content
-				ImGui::TextWrapped("%s", msg.content.c_str());
+				{
+					for (const auto& pair: otherPlayers)
+					{
+						const PlayerInfo& player = pair.second;
+						// Show a colored indicator and player name with ID
+						ImGui::TextColored(ImVec4(0.4f, 0.8f, 0.4f, 1.0f), "●"); // Keep green for player indicator
+						ImGui::SameLine();
+						ImGui::TextUnformatted(player.name.c_str());
+						ImGui::SameLine();
+						ImGui::TextColored(ImVec4(0.70f, 0.68f, 0.64f, 1.00f), "(ID: %u)", player.id);
+						// Show position indented
+						ImGui::Indent(10);
+						ImGui::TextColored(ImVec4(0.80f, 0.78f, 0.74f, 1.00f), "Position: %.1f, %.1f, %.1f", player.position.x, player.position.y, player.position.z);
+						ImGui::Unindent(10);
+					}
+				}
+				ImGui::EndChild();
 			}
 
-			// Auto-scroll to bottom if not manually scrolled
-			if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 20)
-				ImGui::SetScrollHereY(1.0f);
-		}
-		ImGui::EndChild();
-
-		// Chat input with send button - improved version with focus handling
-		if (chatFocused && !ImGui::IsAnyItemActive())
-		{
-			ImGui::SetKeyboardFocusHere();
-		}
-
-		// Create flags for input text
-		ImGuiInputTextFlags inputFlags = ImGuiInputTextFlags_EnterReturnsTrue;
-
-		// Add command history support
-		if (ImGui::IsKeyPressed(ImGuiKey_UpArrow) && chatFocused && !commandHistory.empty())
-		{
-			if (commandHistoryIndex == -1)
+			// Player position diagram
 			{
-				commandHistoryIndex = commandHistory.size() - 1;
-			}
-			else if (commandHistoryIndex > 0)
-			{
-				commandHistoryIndex--;
+				ImGui::Separator();
+				ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.93f, 0.90f, 0.85f, 1.00f)); // Primary color
+				ImGui::TextUnformatted("PLAYER POSITIONS");
+				ImGui::PopStyleColor();
+
+				// Calculate map size and position
+				const float mapSize = ImGui::GetContentRegionAvail().x - 10;
+				const float mapPadding = 5.0f;
+				const ImVec2 mapPos = ImGui::GetCursorScreenPos();
+				const ImVec2 mapCenter = ImVec2(mapPos.x + mapSize / 2, mapPos.y + mapSize / 2);
+
+				// Create a square canvas for the map
+				ImGui::InvisibleButton("PositionMap", ImVec2(mapSize, mapSize));
+				ImDrawList* drawList = ImGui::GetWindowDrawList();
+
+				// Draw map background and border
+				drawList->AddRectFilled(ImVec2(mapPos.x, mapPos.y),
+				        ImVec2(mapPos.x + mapSize, mapPos.y + mapSize),
+				        ImGui::GetColorU32(ImVec4(0.15f, 0.14f, 0.14f, 1.00f)), // Background color
+				        4.0f                                                    // Rounded corners
+				);
+				drawList->AddRect(ImVec2(mapPos.x, mapPos.y),
+				        ImVec2(mapPos.x + mapSize, mapPos.y + mapSize),
+				        ImGui::GetColorU32(ImVec4(0.30f, 0.30f, 0.30f, 0.50f)), // Border color
+				        4.0f,                                                   // Rounded corners
+				        0,
+				        1.5f // Line thickness
+				);
+
+				// Draw grid lines
+				const int gridLines = 4; // 4x4 grid
+				const float gridStep = mapSize / gridLines;
+				const float gridAlpha = 0.3f;
+
+				for (int i = 1; i < gridLines; i++)
+				{
+					// Horizontal lines
+					drawList->AddLine(ImVec2(mapPos.x, mapPos.y + i * gridStep), ImVec2(mapPos.x + mapSize, mapPos.y + i * gridStep), ImGui::GetColorU32(ImVec4(0.5f, 0.5f, 0.5f, gridAlpha)));
+
+					// Vertical lines
+					drawList->AddLine(ImVec2(mapPos.x + i * gridStep, mapPos.y), ImVec2(mapPos.x + i * gridStep, mapPos.y + mapSize), ImGui::GetColorU32(ImVec4(0.5f, 0.5f, 0.5f, gridAlpha)));
+				}
+
+				// Get world boundaries for scaling
+				// Note: In a real application, you'd determine these dynamically based on the game world
+				// For this example, I'm using hardcoded values that should be replaced with your game data
+				float worldMinX = -100.0f;
+				float worldMaxX = 100.0f;
+				float worldMinZ = -100.0f;
+				float worldMaxZ = 100.0f;
+
+				// Helper function to map world coordinates to map coordinates
+				auto worldToMap = [&](float x, float z) -> ImVec2
+				{
+					float mapX = mapPos.x + mapPadding + (x - worldMinX) / (worldMaxX - worldMinX) * (mapSize - 2 * mapPadding);
+					float mapY = mapPos.y + mapPadding + (z - worldMinZ) / (worldMaxZ - worldMinZ) * (mapSize - 2 * mapPadding);
+					return ImVec2(mapX, mapY);
+				};
+
+				// Draw players on the map
+				{
+					std::lock_guard<std::mutex> lock(playersMutex);
+
+					// Draw local player (assuming there's a localPlayer object)
+					ImVec2 playerPos = worldToMap(myPosition.x, -myPosition.z);
+					// Draw local player as a yellow dot with a border
+					drawList->AddCircleFilled(playerPos, 5.0f, ImGui::GetColorU32(ImVec4(0.9f, 0.9f, 0.2f, 1.0f)));
+					drawList->AddCircle(playerPos, 5.0f, ImGui::GetColorU32(ImVec4(0.0f, 0.0f, 0.0f, 0.5f)), 0, 1.5f);
+
+					// Draw other players
+					for (const auto& pair: otherPlayers)
+					{
+						const PlayerInfo& player = pair.second;
+						ImVec2 playerPos = worldToMap(player.position.x, -player.position.z);
+
+						// Draw player as a green dot
+						drawList->AddCircleFilled(playerPos, 4.0f, ImGui::GetColorU32(ImVec4(0.4f, 0.8f, 0.4f, 1.0f)));
+						drawList->AddCircle(playerPos, 4.0f, ImGui::GetColorU32(ImVec4(0.0f, 0.0f, 0.0f, 0.5f)), 0, 1.0f);
+
+						// Draw player name if mouse is hovering over the dot
+						if ((ImGui::IsItemHovered() || true) && ImGui::IsMouseHoveringRect(ImVec2(playerPos.x - 5, playerPos.y - 5), ImVec2(playerPos.x + 5, playerPos.y + 5)))
+						{
+							ImGui::BeginTooltip();
+							ImGui::Text("%s (ID: %u)", player.name.c_str(), player.id);
+							ImGui::Text("Position: %.1f, %.1f, %.1f", player.position.x, player.position.y, player.position.z);
+							ImGui::EndTooltip();
+						}
+					}
+				}
+
+				// Add compass indicators
+				float compassRadius = 15.0f;
+				float compassOffset = 20.0f;
+				ImVec2 compassPos = ImVec2(mapPos.x + mapSize - compassOffset, mapPos.y + compassOffset);
+
+				// Draw compass circle
+				drawList->AddCircleFilled(compassPos, compassRadius, ImGui::GetColorU32(ImVec4(0.15f, 0.15f, 0.15f, 0.7f)));
+				drawList->AddCircle(compassPos, compassRadius, ImGui::GetColorU32(ImVec4(0.5f, 0.5f, 0.5f, 0.7f)));
+
+				// Draw direction markers (N, E, S, W)
+				drawList->AddText(ImVec2(compassPos.x - 4, compassPos.y - compassRadius - 12), ImGui::GetColorU32(ImVec4(0.9f, 0.9f, 0.9f, 0.7f)), "N");
+				drawList->AddText(ImVec2(compassPos.x + compassRadius + 4, compassPos.y - 8), ImGui::GetColorU32(ImVec4(0.9f, 0.9f, 0.9f, 0.7f)), "E");
+				drawList->AddText(ImVec2(compassPos.x - 4, compassPos.y + compassRadius), ImGui::GetColorU32(ImVec4(0.9f, 0.9f, 0.9f, 0.7f)), "S");
+				drawList->AddText(ImVec2(compassPos.x - compassRadius - 10, compassPos.y - 8), ImGui::GetColorU32(ImVec4(0.9f, 0.9f, 0.9f, 0.7f)), "W");
+
+				// Draw legend
+				ImVec2 legendPos = ImVec2(mapPos.x + 10, mapPos.y + mapSize - 25);
+				drawList->AddCircleFilled(ImVec2(legendPos.x + 5, legendPos.y + 5), 4.0f, ImGui::GetColorU32(ImVec4(0.9f, 0.9f, 0.2f, 1.0f)));
+				drawList->AddText(ImVec2(legendPos.x + 15, legendPos.y), ImGui::GetColorU32(ImVec4(0.9f, 0.9f, 0.9f, 0.7f)), "You");
+
+				drawList->AddCircleFilled(ImVec2(legendPos.x + 50, legendPos.y + 5), 4.0f, ImGui::GetColorU32(ImVec4(0.4f, 0.8f, 0.4f, 1.0f)));
+				drawList->AddText(ImVec2(legendPos.x + 60, legendPos.y), ImGui::GetColorU32(ImVec4(0.9f, 0.9f, 0.9f, 0.7f)), "Other players");
 			}
 
-			if (commandHistoryIndex >= 0 && commandHistoryIndex < commandHistory.size())
-			{
-				strncpy_s(chatInputBuffer, commandHistory[commandHistoryIndex].c_str(), sizeof(chatInputBuffer) - 1);
-			}
+			ImGui::EndChild();
 		}
+		ImGui::NextColumn();
 
-		if (ImGui::IsKeyPressed(ImGuiKey_DownArrow) && chatFocused && !commandHistory.empty() && commandHistoryIndex != -1)
+		// Middle panel - Chat
 		{
-			if (commandHistoryIndex < static_cast<int>(commandHistory.size()) - 1)
-			{
-				commandHistoryIndex++;
-				strncpy_s(chatInputBuffer, commandHistory[commandHistoryIndex].c_str(), sizeof(chatInputBuffer) - 1);
-			}
-			else
-			{
-				commandHistoryIndex = -1;
-				chatInputBuffer[0] = '\0';
-			}
-		}
+			ImGui::BeginChild("ChatPanel", ImVec2(ImGui::GetColumnWidth(), ImGui::GetContentRegionAvail().y - 30), true);
 
-		// Escape key exits chat focus
-		if (ImGui::IsKeyPressed(ImGuiKey_Escape) && chatFocused)
-		{
-			chatFocused = false;
-			chatInputBuffer[0] = '\0';
-		}
-
-		float availableWidth = ImGui::GetContentRegionAvail().x - 60 - ImGui::GetStyle().ItemSpacing.x;
-
-		// Begin a group to manage the layout
-		ImGui::BeginGroup();
-
-		// Apply your style if focused
-		if (chatFocused)
-		{
-			ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.25f, 0.24f, 0.24f, 1.00f));
-		}
-
-		// Use the calculated width for the input text
-		ImGui::SetNextItemWidth(availableWidth);
-		bool enterPressed = ImGui::InputText("##ChatInput", chatInputBuffer, IM_ARRAYSIZE(chatInputBuffer), inputFlags);
-
-		if (chatFocused)
-		{
+			ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.93f, 0.90f, 0.85f, 1.00f)); // Primary color (#EEE5DA)
+			ImGui::TextUnformatted("CHAT");
 			ImGui::PopStyleColor();
-		}
 
-		ImGui::SameLine();
-		bool sendClicked = ImGui::Button("Send", ImVec2(60, 0));
+			ImGui::Separator();
 
-		// End the group
-		ImGui::EndGroup();
-
-		if (enterPressed || sendClicked)
-		{
-			if (chatInputBuffer[0] != '\0')
+			// Chat message display with scrolling
+			ImGui::BeginChild("ChatMessages", ImVec2(0, -ImGui::GetFrameHeightWithSpacing() - 10), true);
 			{
-				std::string chatStr(chatInputBuffer);
-				processChatCommand(chatStr);
-				// Add to command history
-				if (!commandHistory.empty() && commandHistory.back() != chatStr)
+				std::lock_guard<std::mutex> chatLock(chatMutex);
+				for (const auto& msg: chatMessages)
 				{
-					commandHistory.push_back(chatStr);
+					// Format timestamp (could be improved)
+					std::string timeStr = "[" + std::to_string(msg.timestamp) + "]";
+
+					// Format sender with different colors based on type
+					ImVec4 senderColor;
+					if (msg.sender == "System" || msg.sender == "Server")
+						senderColor = ImVec4(0.85f, 0.75f, 0.55f, 1.0f); // Gold-ish for system
+					else if (msg.sender == "You")
+						senderColor = ImVec4(0.2f, 0.8f, 0.2f, 1.0f); // Keep green for self
+					else
+						senderColor = ImVec4(0.93f, 0.90f, 0.85f, 1.0f); // Primary color for others
+
+					// Print timestamp in muted color
+					ImGui::TextColored(ImVec4(0.70f, 0.68f, 0.64f, 1.00f), "%s", timeStr.c_str());
+					ImGui::SameLine();
+
+					// Print sender name with color
+					ImGui::TextColored(senderColor, "%s:", msg.sender.c_str());
+					ImGui::SameLine();
+
+					// Print message content
+					ImGui::TextWrapped("%s", msg.content.c_str());
 				}
-				else if (commandHistory.empty())
-				{
-					commandHistory.push_back(chatStr);
-				}
-				while (commandHistory.size() > MAX_HISTORY_COMMANDS)
-				{
-					commandHistory.pop_front();
-				}
-				commandHistoryIndex = -1;
-				chatInputBuffer[0] = '\0'; // Clear input
+
+				// Auto-scroll to bottom if not manually scrolled
+				if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 20)
+					ImGui::SetScrollHereY(1.0f);
 			}
-			// Keep focus if still in chat input field
-			if (ImGui::IsItemDeactivated())
+			ImGui::EndChild();
+
+			// Chat input with send button - only enabled when connected
+			bool inputEnabled = (connectionState == ConnectionState::Connected);
+
+			if (!inputEnabled)
+			{
+				ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * 0.5f);
+			}
+
+			if (chatFocused && !ImGui::IsAnyItemActive() && inputEnabled)
+			{
+				ImGui::SetKeyboardFocusHere();
+			}
+
+			// Create flags for input text
+			ImGuiInputTextFlags inputFlags = ImGuiInputTextFlags_EnterReturnsTrue;
+			if (!inputEnabled)
+			{
+				inputFlags |= ImGuiInputTextFlags_ReadOnly;
+			}
+
+			// Add command history support
+			if (ImGui::IsKeyPressed(ImGuiKey_UpArrow) && chatFocused && !commandHistory.empty() && inputEnabled)
+			{
+				if (commandHistoryIndex == -1)
+				{
+					commandHistoryIndex = commandHistory.size() - 1;
+				}
+				else if (commandHistoryIndex > 0)
+				{
+					commandHistoryIndex--;
+				}
+
+				if (commandHistoryIndex >= 0 && commandHistoryIndex < commandHistory.size())
+				{
+					strncpy_s(chatInputBuffer, commandHistory[commandHistoryIndex].c_str(), sizeof(chatInputBuffer) - 1);
+				}
+			}
+
+			if (ImGui::IsKeyPressed(ImGuiKey_DownArrow) && chatFocused && !commandHistory.empty() && commandHistoryIndex != -1 && inputEnabled)
+			{
+				if (commandHistoryIndex < static_cast<int>(commandHistory.size()) - 1)
+				{
+					commandHistoryIndex++;
+					strncpy_s(chatInputBuffer, commandHistory[commandHistoryIndex].c_str(), sizeof(chatInputBuffer) - 1);
+				}
+				else
+				{
+					commandHistoryIndex = -1;
+					chatInputBuffer[0] = '\0';
+				}
+			}
+
+			// Escape key exits chat focus
+			if (ImGui::IsKeyPressed(ImGuiKey_Escape) && chatFocused)
 			{
 				chatFocused = false;
+				chatInputBuffer[0] = '\0';
 			}
+
+			float availableWidth = ImGui::GetContentRegionAvail().x - 60 - ImGui::GetStyle().ItemSpacing.x;
+
+			// Begin a group to manage the layout
+			ImGui::BeginGroup();
+
+			// Apply your style if focused
+			if (chatFocused && inputEnabled)
+			{
+				ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.25f, 0.24f, 0.24f, 1.00f));
+			}
+
+			// Use the calculated width for the input text
+			ImGui::SetNextItemWidth(availableWidth);
+			bool enterPressed = ImGui::InputText("##ChatInput", chatInputBuffer, IM_ARRAYSIZE(chatInputBuffer), inputFlags);
+
+			if (chatFocused && inputEnabled)
+			{
+				ImGui::PopStyleColor();
+			}
+
+			ImGui::SameLine();
+			bool sendClicked = ImGui::Button("Send", ImVec2(60, 0)) && inputEnabled;
+
+			// End the group
+			ImGui::EndGroup();
+
+			if (!inputEnabled)
+			{
+				ImGui::PopStyleVar();
+			}
+
+			if ((enterPressed || sendClicked) && inputEnabled)
+			{
+				if (chatInputBuffer[0] != '\0')
+				{
+					std::string chatStr(chatInputBuffer);
+					processChatCommand(chatStr);
+					// Add to command history
+					if (!commandHistory.empty() && commandHistory.back() != chatStr)
+					{
+						commandHistory.push_back(chatStr);
+					}
+					else if (commandHistory.empty())
+					{
+						commandHistory.push_back(chatStr);
+					}
+					while (commandHistory.size() > MAX_HISTORY_COMMANDS)
+					{
+						commandHistory.pop_front();
+					}
+					commandHistoryIndex = -1;
+					chatInputBuffer[0] = '\0'; // Clear input
+				}
+				// Keep focus if still in chat input field
+				if (ImGui::IsItemDeactivated())
+				{
+					chatFocused = false;
+				}
+			}
+
+			ImGui::EndChild();
 		}
+		ImGui::NextColumn();
+
+		// Right panel - Controls
+		{
+			ImGui::BeginChild("Controls", ImVec2(ImGui::GetColumnWidth(), ImGui::GetContentRegionAvail().y - 30), true);
+			drawNetworkOptionsUI();
+
+			ImGui::EndChild();
+		}
+		ImGui::Columns(1);
+
+		// Bottom status bar
+		ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.20f, 0.19f, 0.19f, 1.00f)); // Light background
+		ImGui::BeginChild("StatusBar", ImVec2(ImGui::GetContentRegionAvail().x, 25), true, ImGuiWindowFlags_NoScrollbar);
+
+		// Adjust vertical position to center text
+		ImGui::SetCursorPosY(ImGui::GetCursorPosY() - 5);
+		ImGui::Text("Ping: %ums | Packets: %u/%u | Data: %u/%u bytes", networkManager->getPing(), networkManager->getPacketsSent(), networkManager->getPacketsReceived(), networkManager->getBytesSent(), networkManager->getBytesReceived());
+		ImGui::SameLine(ImGui::GetContentRegionAvail().x - 150);
+		ImGui::Text("Players Online: %zu", otherPlayers.size() + 1); // +1 for self
 
 		ImGui::EndChild();
+		ImGui::PopStyleColor(); // ChildBg
 	}
-	ImGui::NextColumn();
 
-	// Right panel - Help & Controls
-	{
-		ImGui::BeginChild("HelpPanel", ImVec2(ImGui::GetColumnWidth(), ImGui::GetContentRegionAvail().y - 30), true);
-		drawNetworkOptionsUI();
-
-		if (ImGui::CollapsingHeader("Controls", ImGuiTreeNodeFlags_DefaultOpen))
-		{
-			ImGui::Columns(2, "ControlsColumns", false);
-			ImGui::TextColored(ImVec4(0.93f, 0.90f, 0.85f, 1.00f), "WASD"); // Primary color (#EEE5DA)
-			ImGui::NextColumn();
-			ImGui::TextWrapped("Move horizontally");
-			ImGui::NextColumn();
-
-			ImGui::TextColored(ImVec4(0.93f, 0.90f, 0.85f, 1.00f), "QE");
-			ImGui::NextColumn();
-			ImGui::TextWrapped("Move vertically");
-			ImGui::NextColumn();
-
-			ImGui::TextColored(ImVec4(0.93f, 0.90f, 0.85f, 1.00f), "T");
-			ImGui::NextColumn();
-			ImGui::TextWrapped("Chat mode");
-			ImGui::NextColumn();
-
-			ImGui::TextColored(ImVec4(0.93f, 0.90f, 0.85f, 1.00f), "ESC");
-			ImGui::NextColumn();
-			ImGui::TextWrapped("Exit");
-			ImGui::NextColumn();
-
-			ImGui::TextColored(ImVec4(0.93f, 0.90f, 0.85f, 1.00f), "F1");
-			ImGui::NextColumn();
-			ImGui::TextWrapped("Toggle debug");
-			ImGui::NextColumn();
-
-			ImGui::TextColored(ImVec4(0.93f, 0.90f, 0.85f, 1.00f), "H");
-			ImGui::NextColumn();
-			ImGui::TextWrapped("Toggle help");
-			ImGui::NextColumn();
-
-			ImGui::TextColored(ImVec4(0.93f, 0.90f, 0.85f, 1.00f), "F3");
-			ImGui::NextColumn();
-			ImGui::TextWrapped("Toggle network stats");
-			ImGui::NextColumn();
-
-			ImGui::Columns(1);
-		}
-
-		if (ImGui::CollapsingHeader("Client Commands"))
-		{
-			ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.0f), "/help");
-			ImGui::SameLine();
-			ImGui::TextWrapped("Toggle help screen");
-
-			ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.0f), "/clear");
-			ImGui::SameLine();
-			ImGui::TextWrapped("Clear chat history");
-
-			ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.0f), "/debug");
-			ImGui::SameLine();
-			ImGui::TextWrapped("Toggle debug mode");
-
-			ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.0f), "/stats");
-			ImGui::SameLine();
-			ImGui::TextWrapped("Toggle network stats");
-
-			ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.0f), "/reconnect");
-			ImGui::SameLine();
-			ImGui::TextWrapped("Reconnect to server");
-
-			ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.0f), "/quit");
-			ImGui::SameLine();
-			ImGui::TextWrapped("Exit client");
-		}
-
-		if (ImGui::CollapsingHeader("Server Commands"))
-		{
-			ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.0f), "/pos");
-			ImGui::SameLine();
-			ImGui::TextWrapped("Show current position");
-
-			ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.0f), "/tp x y z");
-			ImGui::SameLine();
-			ImGui::TextWrapped("Teleport to coordinates");
-
-			ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.0f), "/players");
-			ImGui::SameLine();
-			ImGui::TextWrapped("List online players");
-
-			ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.0f), "/me action");
-			ImGui::SameLine();
-			ImGui::TextWrapped("Send an action message");
-
-			ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.0f), "/w username message");
-			ImGui::SameLine();
-			ImGui::TextWrapped("Send private message");
-		}
-
-		if (ImGui::CollapsingHeader("Admin Commands"))
-		{
-			ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.0f), "/kick username");
-			ImGui::SameLine();
-			ImGui::TextWrapped("Kick a player");
-
-			ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.0f), "/ban username");
-			ImGui::SameLine();
-			ImGui::TextWrapped("Ban a player");
-
-			ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.0f), "/broadcast message");
-			ImGui::SameLine();
-			ImGui::TextWrapped("Send message to all");
-
-			ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.0f), "/setadmin username");
-			ImGui::SameLine();
-			ImGui::TextWrapped("Grant admin status");
-
-			ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.0f), "/tpplayer username");
-			ImGui::SameLine();
-			ImGui::TextWrapped("Teleport to player");
-		}
-
-		ImGui::EndChild();
-	}
-	ImGui::Columns(1);
-
-	// Bottom status bar
-	ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.20f, 0.19f, 0.19f, 1.00f)); // Light background
-	ImGui::BeginChild("StatusBar", ImVec2(ImGui::GetContentRegionAvail().x, 25), true, ImGuiWindowFlags_NoScrollbar);
-
-	// Adjust vertical position to center text
-	ImGui::SetCursorPosY(ImGui::GetCursorPosY() - 5);
-	ImGui::Text("Ping: %ums | Packets: %u/%u | Data: %u/%u bytes", pingMs, packetsSent, packetsReceived, bytesSent, bytesReceived);
-	ImGui::SameLine(ImGui::GetContentRegionAvail().x - 150);
-	ImGui::Text("Players Online: %zu", otherPlayers.size() + 1); // +1 for self
-
-	ImGui::EndChild();
-	ImGui::PopStyleColor(); // ChildBg
-
-	ImGui::PopStyleColor(3); // Header colors
 	ImGui::End();
 
 	// Check if we should exit

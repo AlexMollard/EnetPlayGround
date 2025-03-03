@@ -78,10 +78,15 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="src\AuthManager.cpp" />
+    <ClCompile Include="src\Logger.cpp" />
+    <ClCompile Include="src\NetworkManager.cpp" />
     <ClCompile Include="src/EnetClient.cpp" />
     <ClCompile Include="src/GameClient.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="src\AuthManager.h" />
+    <ClInclude Include="src\NetworkManager.h" />
     <ClInclude Include="src/Constants.h" />
     <ClInclude Include="src/GameClient.h" />
     <ClInclude Include="src/Logger.h" />

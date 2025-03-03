@@ -1038,7 +1038,7 @@ private:
 		}
 		else if (message.substr(0, 9) == "POSITION:" && player->isAuthenticated)
 		{
-			handlePositionUpdate(*player, message.substr(9));
+			handleSendPosition(*player);
 		}
 		else if (message.substr(0, 5) == "CHAT:" && player->isAuthenticated)
 		{
@@ -1624,72 +1624,44 @@ private:
 		}
 	}
 
-	// Handle position update
-	void handlePositionUpdate(Player& player, const std::string& posData)
+	// Handle sending position to client
+	void handleSendPosition(Player& player)
 	{
 		try
 		{
-			// Get current time to track when this update was received
+			// Get current time
 			uint32_t currentTime = Utils::getCurrentTimeMs();
 
-			auto parts = Utils::splitString(posData, ',');
-			if (parts.size() < 3)
-			{
-				logger.error("Invalid position update from " + player.name);
-				return;
-			}
+			// Create position string in the format "x12.34,y56.78,z90.12"
+			std::string positionString = "x" + std::to_string(player.position.x) + "," + "y" + std::to_string(player.position.y) + "," + "z" + std::to_string(player.position.z);
 
-			float x = std::stof(parts[0]);
-			float y = std::stof(parts[1]);
-			float z = std::stof(parts[2]);
+			// Create a position update packet using the existing sendPacket method
+			std::string positionPacket = "POSITION:" + positionString;
 
-			Position newPosition = { x, y, z };
+			// Send the position data to the client
+			sendPacket(player.peer, positionPacket, false); // Using unreliable packets for position updates
 
-			// Validate movement if enabled
-			if (config.enableMovementValidation)
-			{
-				Position oldPosition = player.position;
-				float distance = oldPosition.distanceTo(newPosition);
+			// Log the position update (optional)
+			logger.debug("Sent position update to " + player.name + ": " + positionString);
 
-				// Calculate elapsed time since last position update (in seconds)
-				float elapsedTime = (currentTime - player.lastPositionUpdateTime) / 1000.0f;
+			// Update timestamp of when we last sent position
+			player.lastPositionUpdateTime = currentTime; // Using the existing timestamp field
 
-				// Set a minimum elapsed time to avoid division by zero
-				// and to handle the first position update
-				if (elapsedTime < 0.01f)
-					elapsedTime = 0.01f;
-
-				// Calculate the player's current speed (units per second)
-				float currentSpeed = distance / elapsedTime;
-
-				// Check if speed is within allowed movement speed (with a small margin for error)
-				// Add a 20% tolerance to account for network jitter
-				float speedLimit = config.maxMovementSpeed * 1.2f;
-
-				if (currentSpeed > speedLimit && distance > 0.5f)
-				{ // Only check if moved significantly
-					logger.debug("Player " + player.name + " moved too fast: " + std::to_string(currentSpeed) + " units/sec (limit: " + std::to_string(speedLimit) + "), distance: " + std::to_string(distance) + " in " + std::to_string(elapsedTime) + " seconds");
-
-					// Reject movement and teleport back
-					sendTeleport(player, player.lastValidPosition);
-					return;
-				}
-
-				// Movement is valid, update last valid position
-				player.lastValidPosition = newPosition;
-			}
-
-			// Update player position and timestamp
-			Position oldPosition = player.position;
-			player.position = newPosition;
-			player.lastPositionUpdateTime = currentTime;
-
-			// Update in spatial grid
-			spatialGrid.updateEntity(player.id, oldPosition, newPosition);
+			// Not sure if I should send it to ever player just yet
+			// std::set<uint32_t> nearbyPlayers = spatialGrid.getNearbyEntities(player.position, config.interestRadius);
+			// for (uint32_t nearbyId : nearbyPlayers) {
+			//     // Skip self
+			//     if (nearbyId == player.id) continue;
+			//
+			//     auto it = players.find(nearbyId);
+			//     if (it != players.end()) {
+			//         sendPacket(it->second.peer, positionPacket, false);
+			//     }
+			// }
 		}
 		catch (const std::exception& e)
 		{
-			logger.error("Error parsing position update from " + player.name + ": " + e.what());
+			logger.error("Error sending position update to " + player.name + ": " + e.what());
 		}
 	}
 

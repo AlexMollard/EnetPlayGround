@@ -1,6 +1,9 @@
 #pragma comment(lib, "ws2_32.lib")
 #pragma comment(lib, "winmm.lib")
 
+#include <hello_imgui/hello_imgui.h>
+#include <iostream>
+
 #include "GameClient.h"
 #include "Logger.h"
 
@@ -54,27 +57,25 @@ int main(int argc, char* argv[])
 	params.imGuiWindowParams.showMenuBar = false;
 	params.imGuiWindowParams.showStatusBar = false;
 
-	// Create game client
+	// Create game client - pass command line parameters to constructor
 	std::shared_ptr<GameClient> client = std::make_shared<GameClient>("", "", debugMode);
+
+	// Set server address and port from command line
+	if (serverAddress != DEFAULT_SERVER)
+	{
+		// We'll let the user set this in the login UI
+	}
 
 	// Configure ImGui style
 	params.callbacks.SetupImGuiStyle = [client]() { client->setupImGuiTheme(); };
 
-	// Initialization of the client will happen in the setup phase
-	params.callbacks.PostInit = [client, serverAddress, serverPort]()
+	// Initialize the client, but don't connect yet - let the user initiate connection from UI
+	params.callbacks.PostInit = [client]()
 	{
-		// Initialize
+		// Initialize network components only
 		if (!client->initialize())
 		{
 			std::cerr << "Failed to initialize client. Exiting." << std::endl;
-			HelloImGui::GetRunnerParams()->appShallExit = true;
-			return;
-		}
-
-		// Connect to server
-		if (!client->connectToServer(serverAddress.c_str(), serverPort))
-		{
-			std::cerr << "Failed to connect to server. Exiting." << std::endl;
 			HelloImGui::GetRunnerParams()->appShallExit = true;
 			return;
 		}

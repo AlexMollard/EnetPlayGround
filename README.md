@@ -56,12 +56,16 @@ I actually made this project because I have been playing alot of mmo's and wante
 <div align="center">
   <table>
     <tr>
-      <td width="50%">
+      <td width="33%">
         <img src="docs/FirstServer.png" alt="Server Console" width="100%" style="border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
         <p align="center"><i>Server console showing connected clients</i></p>
       </td>
-      <td width="50%">
-        <img src="docs/FirstClient.png" alt="Client Interface" width="100%" style="border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
+      <td width="33%">
+        <img src="docs/Login.png" alt="Login Interface" width="100%" style="border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
+        <p align="center"><i>Client interface with login screen</i></p>
+      </td>
+      <td width="33%">
+        <img src="docs/SecondClient.png" alt="Client Interface" width="100%" style="border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
         <p align="center"><i>Client interface with messages in chat from another client</i></p>
       </td>
     </tr>
@@ -151,6 +155,7 @@ vcpkg install hello-imgui
 - [x] Auto sign in for clients
 - [x] Add a way to send messages to specific clients
 - [x] Admin controls for the server
+- [x] Position visualization for clients
 - [ ] Find a better solution for multi threading the server (Way too many deadlock issues)
 - [ ] Fix the bug where the server crashes after a client registers whilst another client is already connected
 - [ ] Better encryption (Right now its a simple hash)
