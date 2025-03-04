@@ -57,8 +57,8 @@ I actually made this project because I have been playing alot of mmo's and wante
   <table>
     <tr>
       <td width="33%">
-        <img src="docs/FirstServer.png" alt="Server Console" width="100%" style="border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
-        <p align="center"><i>Server console showing connected clients</i></p>
+        <img src="docs/SecondServer.png" alt="Server Console" width="100%" style="border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
+        <p align="center"><i>Server console showing connected clients and plugins</i></p>
       </td>
       <td width="33%">
         <img src="docs/Login.png" alt="Login Interface" width="100%" style="border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
