@@ -61,11 +61,11 @@ I actually made this project because I have been playing alot of mmo's and wante
         <p align="center"><i>Server console showing connected clients and plugins</i></p>
       </td>
       <td width="33%">
-        <img src="docs/Login.png" alt="Login Interface" width="100%" style="border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
+        <img src="docs/SecondLogin.png" alt="Login Interface" width="100%" style="border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
         <p align="center"><i>Client interface with login screen</i></p>
       </td>
       <td width="33%">
-        <img src="docs/SecondClient.png" alt="Client Interface" width="100%" style="border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
+        <img src="docs/ThirdClient.png" alt="Client Interface" width="100%" style="border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
         <p align="center"><i>Client interface with messages in chat from another client</i></p>
       </td>
     </tr>
