@@ -112,3 +112,48 @@ std::string Utils::formatBytes(uint32_t bytes)
 	ss << std::fixed << std::setprecision(2) << value << " " << suffixes[suffixIndex];
 	return ss.str();
 }
+
+std::string Utils::formatTimestamp(int64_t timestamp)
+{
+	// get the current time
+	time_t now = time(0);
+
+	// get the difference
+	int diff = now - timestamp;
+
+	// if the difference is less than 60 seconds
+	if (diff < 60)
+	{
+		return "Just now";
+	}
+
+	// if the difference is less than 60 minutes
+	if (diff < 3600)
+	{
+		return std::to_string(diff / 60) + "m ago";
+	}
+
+	// if the difference is less than 24 hours
+	if (diff < 86400)
+	{
+		return std::to_string(diff / 3600) + "h ago";
+	}
+
+	// if the difference is less than 7 days
+	if (diff < 604800)
+	{
+		return std::to_string(diff / 86400) + "d ago";
+	}
+
+	// if the difference is less than 30 days
+	if (diff < 2592000)
+	{
+		return std::to_string(diff / 604800) + "w ago";
+	}
+
+	// if the difference is less than 365 days
+	if (diff < 31536000)
+	{
+		return std::to_string(diff / 2592000) + "mo ago";
+	}
+}

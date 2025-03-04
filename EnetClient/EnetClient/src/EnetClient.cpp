@@ -56,37 +56,112 @@ int main(int argc, char* argv[])
 		const std::string resDir = IsDebuggerPresent() ? "../../res/" : "";
 		ImGuiIO& io = ImGui::GetIO();
 
-		// Regular font configuration
-		FontConfig regularFont{ resDir + "JetBrainsMono.ttf", BASE_FONT_SIZE, nullptr, nullptr };
+		// Font sizes
+		const float BASE_FONT_SIZE = 16.0f;   // Regular text
+		const float HEADER_FONT_SIZE = 22.0f; // Headers/titles
+		const float SMALL_FONT_SIZE = 14.0f;  // Small text (optional)
 
-		// Icon font configuration
+		// ImWchar ranges for icons
 		static const ImWchar icons_ranges[] = { ICON_MIN_LC, ICON_MAX_LC, 0 };
-		ImFontConfig icons_config;
-		icons_config.MergeMode = true;
-		icons_config.PixelSnapH = true;
-		icons_config.OversampleH = 2;
-		icons_config.OversampleV = 2;
-		icons_config.GlyphOffset = ImVec2(0, 3);
 
-		FontConfig iconFont{ resDir + "lucide.ttf", BASE_FONT_SIZE, icons_ranges, &icons_config };
-
-		// Load fonts and handle errors
-		client->getLogger().debug("Loading fonts...");
-		client->getLogger().debug("Regular font: " + regularFont.path);
-		client->getLogger().debug("Icon font: " + iconFont.path);
-		if (!LoadFont(regularFont, io.Fonts))
+		// --- Font 0: Regular font with icons ---
 		{
-			client->getLogger().error("Failed to load regular font");
+			// Base font config
+			ImFontConfig baseConfig;
+			baseConfig.SizePixels = BASE_FONT_SIZE;
+			strcpy_s(baseConfig.Name, "Regular");
+
+			// Regular font
+			FontConfig regularFont{ resDir + "JetBrainsMono.ttf", BASE_FONT_SIZE, nullptr, &baseConfig };
+			if (!LoadFont(regularFont, io.Fonts))
+			{
+				client->getLogger().error("Failed to load regular font");
+			}
+
+			// Icons config to merge with regular font
+			ImFontConfig iconsConfig;
+			iconsConfig.MergeMode = true;
+			iconsConfig.PixelSnapH = true;
+			iconsConfig.OversampleH = 2;
+			iconsConfig.OversampleV = 2;
+			iconsConfig.GlyphOffset = ImVec2(0, 3);
+			strcpy_s(iconsConfig.Name, "Icons-Regular");
+
+			// Icon font to merge with regular font
+			FontConfig iconFont{ resDir + "lucide.ttf", BASE_FONT_SIZE, icons_ranges, &iconsConfig };
+			if (!LoadFont(iconFont, io.Fonts))
+			{
+				client->getLogger().error("Failed to load icon font for regular");
+			}
 		}
 
-		if (!LoadFont(iconFont, io.Fonts))
+		// --- Font 1: Header font with icons ---
 		{
-			client->getLogger().error("Failed to load icon font");
+			// Header font config
+			ImFontConfig headerConfig;
+			headerConfig.SizePixels = HEADER_FONT_SIZE;
+			strcpy_s(headerConfig.Name, "Header");
+
+			// Header font
+			FontConfig headerFont{ resDir + "JetBrainsMono.ttf", HEADER_FONT_SIZE, nullptr, &headerConfig };
+			if (!LoadFont(headerFont, io.Fonts))
+			{
+				client->getLogger().error("Failed to load header font");
+			}
+
+			// Icons config to merge with header font
+			ImFontConfig iconsConfig;
+			iconsConfig.MergeMode = true;
+			iconsConfig.PixelSnapH = true;
+			iconsConfig.OversampleH = 2;
+			iconsConfig.OversampleV = 2;
+			iconsConfig.GlyphOffset = ImVec2(0, 3);
+			strcpy_s(iconsConfig.Name, "Icons-Header");
+
+			// Icon font to merge with header font
+			FontConfig iconFont{ resDir + "lucide.ttf", HEADER_FONT_SIZE, icons_ranges, &iconsConfig };
+			if (!LoadFont(iconFont, io.Fonts))
+			{
+				client->getLogger().error("Failed to load icon font for header");
+			}
+		}
+
+		// --- Font 2: Small font with icons (optional) ---
+		{
+			// Small font config
+			ImFontConfig smallConfig;
+			smallConfig.SizePixels = SMALL_FONT_SIZE;
+			strcpy_s(smallConfig.Name, "Small");
+
+			// Small font
+			FontConfig smallFont{ resDir + "JetBrainsMono.ttf", SMALL_FONT_SIZE, nullptr, &smallConfig };
+			if (!LoadFont(smallFont, io.Fonts))
+			{
+				client->getLogger().error("Failed to load small font");
+			}
+
+			// Icons config to merge with small font
+			ImFontConfig iconsConfig;
+			iconsConfig.MergeMode = true;
+			iconsConfig.PixelSnapH = true;
+			iconsConfig.OversampleH = 2;
+			iconsConfig.OversampleV = 2;
+			iconsConfig.GlyphOffset = ImVec2(0, 3);
+			strcpy_s(iconsConfig.Name, "Icons-Small");
+
+			// Icon font to merge with small font
+			FontConfig iconFont{ resDir + "lucide.ttf", SMALL_FONT_SIZE, icons_ranges, &iconsConfig };
+			if (!LoadFont(iconFont, io.Fonts))
+			{
+				client->getLogger().error("Failed to load icon font for small");
+			}
 		}
 
 		io.FontGlobalScale = 1.0f;
-
 		client->getLogger().debug("Fonts loaded!");
+
+		// Log the number of loaded fonts for debugging
+		client->getLogger().debug("Total fonts loaded: " + std::to_string(io.Fonts->Fonts.Size));
 	};
 
 	// Configure ImGui style

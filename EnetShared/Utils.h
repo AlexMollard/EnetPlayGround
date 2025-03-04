@@ -28,4 +28,7 @@ public:
 
 	// Format bytes to human-readable string
 	static std::string formatBytes(uint32_t bytes);
+
+	// Converts a timestamp to a human readable string
+	static std::string formatTimestamp(int64_t timestamp);
 };

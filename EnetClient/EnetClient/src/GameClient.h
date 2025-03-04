@@ -13,6 +13,7 @@
 #include "AuthManager.h"
 #include "Logger.h"
 #include "NetworkManager.h"
+#include <corecrt.h>
 
 //=============================================================================
 // DATA STRUCTURES
@@ -57,7 +58,7 @@ struct ChatMessage
 {
 	std::string sender;
 	std::string content;
-	uint32_t timestamp;
+	time_t timestamp;
 };
 
 /**
@@ -67,6 +68,7 @@ enum class ConnectionState
 {
 	Disconnected,
 	LoginScreen,
+	RegisterScreen,
 	Connecting,
 	Authenticating,
 	Connected
@@ -183,6 +185,13 @@ private:
 	bool rememberCredentials = true;
 	bool autoLogin = false;
 
+	// Register UI components
+	bool isRegistering = false;
+	char registerUsernameBuffer[64] = { 0 };
+	char registerPasswordBuffer[64] = { 0 };
+	char registerConfirmPasswordBuffer[64] = { 0 };
+	std::string registerErrorMessage;
+
 	std::thread connectionThread;
 	std::atomic<bool> connectionThreadRunning{ false };
 
@@ -221,9 +230,69 @@ private:
 	void drawLoginScreen();
 
 	/**
+     * Draw register screen
+     */
+	void drawRegisterScreen();
+
+	/**
+     * Draw the main ui when the user is signed in
+     */
+	void drawConnectedUI();
+
+	/**
+     * Draw the top section of the window
+     */
+	void drawHeader();
+
+	/**
+     * Draw the left section where the players are
+     */
+	void drawPlayersPanel(float width, float height);
+
+	/**
+     * Draw center panel, the chat
+     */
+	void drawChatPanel(float width, float height);
+
+	/**
+     * Draw the right panel where the settings are I might remove this tbh
+     */
+	void drawControlsPanel(float width, float height);
+
+	/**
+     * Draw the network settings the sit in the right siude panel
+     */
+	void drawNetworkOptionsUI();
+
+	/**
+     * Draw bottom status bar or footer
+     */
+	void drawStatusBar();
+	
+	/**
+     * Logic for looping your history
+     */
+	void handleChatCommandHistory();
+
+	/**
+     * Logic that runs when the user sends anything in chat
+     */
+	void processChatInput();
+
+	/**
+	 * Kick off a registration attempt
+	 */
+	void initiateRegistration();
+
+	/**
      * Initiate connection with current credentials
      */
 	void initiateConnection();
+
+	/**
+	* Logs the user out and returns to the login screen
+	*/
+	void signOut();
 
 	/**
      * Send a chat message
@@ -268,11 +337,6 @@ private:
      * Clear chat history
      */
 	void clearChatMessages();
-
-	/**
-     * Draw network options UI
-     */
-	void drawNetworkOptionsUI();
 
 	/**
      * Handle server disconnection
