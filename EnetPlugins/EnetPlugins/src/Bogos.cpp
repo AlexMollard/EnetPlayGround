@@ -5,6 +5,7 @@
 #include <unordered_map>
 
 #include "PluginInterface.h"
+#include "IconsLucide.h"
 
 class BogosPlugin : public IPlugin
 {
@@ -68,7 +69,7 @@ public:
 		if (message.find("bogos") != std::string::npos)
 		{
 			helloCounter[sender]++;
-			serverFuncs.broadcastSystemMessage("binted!\n👽");
+			serverFuncs.broadcastSystemMessage("binted!\n" + std::string(ICON_LC_CAT));
 		}
 	}
 
@@ -76,7 +77,7 @@ public:
 	{
 		if (command == "bogos")
 		{
-			serverFuncs.sendSystemMessage(player, "binted!\n👽");
+            serverFuncs.broadcastSystemMessage("binted!\n" + std::string(ICON_LC_CAT));
 			return true;
 		}
 		return false;

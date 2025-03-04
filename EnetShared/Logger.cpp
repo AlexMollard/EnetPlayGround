@@ -21,8 +21,8 @@
 // Initialize static members
 std::unique_ptr<Logger> Logger::instance = nullptr;
 
-Logger::Logger(LogLevel level)
-      : minLevel(level), logFilePath(DEBUG_LOG_FILE)
+Logger::Logger()
+      : logFilePath(DEBUG_LOG_FILE)
 {
 	// Store main thread ID
 #ifdef _WIN32

@@ -81,6 +81,7 @@
     <ClCompile Include="src\bogos.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\..\EnetShared\IconsLucide.h" />
     <ClInclude Include="..\..\EnetShared\Logger.h" />
     <ClInclude Include="..\..\EnetShared\Utils.h" />
     <ClInclude Include="..\..\EnetShared\PluginInterface.h" />

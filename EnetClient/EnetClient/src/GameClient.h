@@ -139,6 +139,11 @@ public:
 		return connectionState == ConnectionState::Connected;
 	}
 
+	Logger& getLogger()
+	{
+		return logger;
+	}
+
 private:
 	//-------------------------------------------------------------------------
 	// PRIVATE IMPLEMENTATION

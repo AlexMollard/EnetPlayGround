@@ -24,7 +24,7 @@ private:
 	std::ofstream logFile;
 	std::mutex logMutex;
 	bool useColors = true;
-	LogLevel minLevel = LogLevel::INFO;
+	LogLevel minLevel = LogLevel::DEBUG;
 	size_t maxFileSize = 10 * 1024 * 1024; // 10 MB default
 	int maxBackupFiles = 3;
 
@@ -46,7 +46,7 @@ private:
 	static std::unique_ptr<Logger> instance;
 
 public:
-	Logger(LogLevel level = LogLevel::INFO);
+	Logger();
 	~Logger();
 
 	// Singleton accessor (optional)

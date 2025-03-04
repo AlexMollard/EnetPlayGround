@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "Constants.h"
+#include "IconsLucide.h"
 
 // Constructor
 GameClient::GameClient() : lastUpdateTime(getCurrentTimeMs())
@@ -687,13 +688,12 @@ void GameClient::updateNetwork()
 
 void GameClient::drawNetworkOptionsUI()
 {
-	if (ImGui::CollapsingHeader("Network Options"))
+	if (ImGui::CollapsingHeader(ICON_LC_SETTINGS " Network Options"))
 	{
 		ImGui::Indent(10);
-
 		// Position update rate
 		int updateRate = positionUpdateRateMs;
-		if (ImGui::SliderInt("Update Rate (ms)", &updateRate, 50, 500))
+		if (ImGui::SliderInt(ICON_LC_WIFI " Update Rate (ms)", &updateRate, 50, 500))
 		{
 			positionUpdateRateMs = updateRate;
 		}
@@ -705,10 +705,9 @@ void GameClient::drawNetworkOptionsUI()
 			ImGui::Text("Controls how often position updates are sent.\nLower values = more responsive but higher bandwidth.");
 			ImGui::EndTooltip();
 		}
-
 		// Movement threshold
 		float threshold = movementThreshold;
-		if (ImGui::SliderFloat("Movement Threshold", &threshold, 0.01f, 1.0f, "%.2f"))
+		if (ImGui::SliderFloat(ICON_LC_MAP_PIN " Movement Threshold", &threshold, 0.01f, 1.0f, "%.2f"))
 		{
 			movementThreshold = threshold;
 		}
@@ -720,10 +719,9 @@ void GameClient::drawNetworkOptionsUI()
 			ImGui::Text("Minimum distance to move before sending a position update.\nHigher values = less updates but less smooth movement.");
 			ImGui::EndTooltip();
 		}
-
 		// Delta compression
 		bool useDelta = useCompressedUpdates;
-		if (ImGui::Checkbox("Use Delta Compression", &useDelta))
+		if (ImGui::Checkbox(ICON_LC_COMMAND " Use Delta Compression", &useDelta))
 		{
 			useCompressedUpdates = useDelta;
 		}
@@ -735,22 +733,18 @@ void GameClient::drawNetworkOptionsUI()
 			ImGui::Text("Only send coordinates that changed significantly.\nReduces bandwidth at the cost of slightly more CPU.");
 			ImGui::EndTooltip();
 		}
-
 		// Stats display
 		if (showStats)
 		{
 			ImGui::Separator();
-			ImGui::Text("Bandwidth Stats");
+			ImGui::Text(ICON_LC_CHART_SPLINE " Bandwidth Stats");
 			ImGui::Text("Position Updates: %d/sec", positionUpdateRateMs > 0 ? (1000 / positionUpdateRateMs) : 0);
-
 			// Calculate average bandwidth for position updates
 			float updatesPerSecond = 1000.0f / positionUpdateRateMs;
 			float bytesPerUpdate = useCompressedUpdates ? 12.0f : 28.0f; // Estimated average sizes
 			float bandwidthBps = updatesPerSecond * bytesPerUpdate;
-
-			ImGui::Text("Estimated Position Bandwidth: %.2f KB/s", bandwidthBps / 1024.0f);
+			ImGui::Text(ICON_LC_TRENDING_UP " Estimated Position Bandwidth: %.2f KB/s", bandwidthBps / 1024.0f);
 		}
-
 		ImGui::Unindent(10);
 	}
 }
@@ -815,8 +809,8 @@ void GameClient::drawLoginScreen()
 	// If connection is in progress, show connecting indicator
 	if (connectionState == ConnectionState::Connecting || connectionState == ConnectionState::Authenticating)
 	{
-		// Center text
-		const char* connectingText = "Connecting to server...";
+		// Center text with icon
+		const char* connectingText = ICON_LC_WIFI " Connecting to server...";
 		ImVec2 textSize = ImGui::CalcTextSize(connectingText);
 		ImGui::SetCursorPosX((contentWidth - textSize.x) * 0.5f);
 		ImGui::Text("%s", connectingText);
@@ -827,10 +821,10 @@ void GameClient::drawLoginScreen()
 		ImGui::ProgressBar(connectionProgress, ImVec2(progressBarWidth, 20), "");
 		ImGui::Spacing();
 
-		// Cancel button
+		// Cancel button with icon
 		const float buttonWidth = 120.0f;
 		ImGui::SetCursorPosX((contentWidth - buttonWidth) * 0.5f);
-		if (ImGui::Button("Cancel", ImVec2(buttonWidth, 30)))
+		if (ImGui::Button(ICON_LC_X " Cancel", ImVec2(buttonWidth, 30)))
 		{
 			disconnect(false);
 			connectionProgress = 0.0f;
@@ -839,13 +833,13 @@ void GameClient::drawLoginScreen()
 	}
 	else
 	{
-		// Login form with better alignment
-		const float labelWidth = 80.0f; // Width for labels
+		float labelWidth = 0.0f; // Width for labels
 
-		// Server selection with consistent alignment
+		// Server selection with consistent alignment and icon
 		ImGui::AlignTextToFramePadding();
-		ImGui::Text("Server:");
+		ImGui::Text(ICON_LC_SERVER " Server:");
 		ImGui::SameLine();
+		labelWidth = ImGui::GetCursorPosX();
 		ImGui::SetNextItemWidth(contentWidth - labelWidth);
 		char serverBuf[128];
 		strncpy_s(serverBuf, networkManager->getServerAddress().c_str(), sizeof(serverBuf) - 1);
@@ -855,22 +849,24 @@ void GameClient::drawLoginScreen()
 		}
 		ImGui::Spacing();
 
-		// Username field with consistent alignment
+		// Username field with consistent alignment and icon
 		ImGui::AlignTextToFramePadding();
-		ImGui::Text("Username:");
+		ImGui::Text(ICON_LC_USER " Username:");
 		ImGui::SameLine();
+		labelWidth = ImGui::GetCursorPosX();
 		ImGui::SetNextItemWidth(contentWidth - labelWidth);
 		ImGui::InputText("##Username", loginUsernameBuffer, sizeof(loginUsernameBuffer));
 
-		// Password field with better alignment
+		// Password field with better alignment and icon
 		ImGui::AlignTextToFramePadding();
-		ImGui::Text("Password:");
+		ImGui::Text(ICON_LC_COMMAND " Password:");
 		ImGui::SameLine();
+		labelWidth = ImGui::GetCursorPosX();
 		ImGuiInputTextFlags passwordFlags = showPassword ? 0 : ImGuiInputTextFlags_Password;
-		ImGui::SetNextItemWidth(contentWidth - labelWidth - 60);
+		ImGui::SetNextItemWidth(contentWidth - labelWidth - 80);
 		ImGui::InputText("##Password", loginPasswordBuffer, sizeof(loginPasswordBuffer), passwordFlags);
 		ImGui::SameLine();
-		if (ImGui::Button(showPassword ? "Hide" : "Show", ImVec2(50, 0)))
+		if (ImGui::Button(showPassword ? ICON_LC_EYE_OFF " Hide" : ICON_LC_EYE " Show", ImVec2(70, 0)))
 		{
 			showPassword = !showPassword;
 		}
@@ -886,29 +882,29 @@ void GameClient::drawLoginScreen()
 			ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.3f, 0.3f, 1.0f));
 
 			// Measure text to decide on centering or wrapping
-			ImVec2 textSize = ImGui::CalcTextSize(loginErrorMessage.c_str());
+			ImVec2 textSize = ImGui::CalcTextSize((ICON_LC_CIRCLE_ALERT " " + loginErrorMessage).c_str());
 			if (textSize.x > contentWidth - 20.0f)
 			{
 				// For long messages, use wrapping
 				ImGui::PushTextWrapPos(ImGui::GetCursorPos().x + contentWidth);
-				ImGui::TextWrapped("%s", loginErrorMessage.c_str());
+				ImGui::TextWrapped("%s %s", ICON_LC_CIRCLE_ALERT, loginErrorMessage.c_str());
 				ImGui::PopTextWrapPos();
 			}
 			else
 			{
 				// For short messages, center
 				ImGui::SetCursorPosX((contentWidth - textSize.x) * 0.5f);
-				ImGui::Text("%s", loginErrorMessage.c_str());
+				ImGui::Text("%s %s", ICON_LC_CIRCLE_ALERT, loginErrorMessage.c_str());
 			}
 
 			ImGui::PopStyleColor();
 			ImGui::Spacing();
 		}
 
-		// Connect button
+		// Connect button with icon
 		const float buttonWidth = 120.0f;
 		ImGui::SetCursorPosX((contentWidth - buttonWidth) * 0.5f);
-		if (ImGui::Button("Connect", ImVec2(buttonWidth, 30)))
+		if (ImGui::Button(ICON_LC_LOG_IN " Connect", ImVec2(buttonWidth, 30)))
 		{
 			// Initiate connection
 			initiateConnection();
@@ -1006,7 +1002,7 @@ void GameClient::drawUI()
 		{
 			ImGui::BeginChild("PlayersPanel", ImVec2(ImGui::GetColumnWidth(), ImGui::GetContentRegionAvail().y - 60), true);
 			ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.93f, 0.90f, 0.85f, 1.00f)); // Primary color (#EEE5DA)
-			ImGui::TextUnformatted("PLAYERS ONLINE");
+			ImGui::TextUnformatted(ICON_LC_USERS " PLAYERS ONLINE"); 
 			ImGui::PopStyleColor();
 			ImGui::Separator();
 
@@ -1027,7 +1023,7 @@ void GameClient::drawUI()
 				std::lock_guard<std::mutex> lock(playersMutex);
 				if (otherPlayers.empty())
 				{
-					ImGui::TextColored(ImVec4(0.80f, 0.78f, 0.74f, 1.00f), "No other players online");
+					ImGui::TextColored(ImVec4(0.80f, 0.78f, 0.74f, 1.00f), ICON_LC_USERS " No other players online");
 				}
 				else
 				{
@@ -1035,14 +1031,14 @@ void GameClient::drawUI()
 					{
 						const PlayerInfo& player = pair.second;
 						// Show a colored indicator and player name with ID
-						ImGui::TextColored(ImVec4(0.4f, 0.8f, 0.4f, 1.0f), "●"); // Keep green for player indicator
+						ImGui::TextColored(ImVec4(0.4f, 0.8f, 0.4f, 1.0f), ICON_LC_USER); // Keep green for player indicator
 						ImGui::SameLine();
 						ImGui::TextUnformatted(player.name.c_str());
 						ImGui::SameLine();
 						ImGui::TextColored(ImVec4(0.70f, 0.68f, 0.64f, 1.00f), "(ID: %u)", player.id);
 						// Show position indented
 						ImGui::Indent(10);
-						ImGui::TextColored(ImVec4(0.80f, 0.78f, 0.74f, 1.00f), "Position: %.1f, %.1f, %.1f", player.position.x, player.position.y, player.position.z);
+						ImGui::TextColored(ImVec4(0.80f, 0.78f, 0.74f, 1.00f), ICON_LC_MAP_PIN " %.1f, %.1f, %.1f", player.position.x, player.position.y, player.position.z);
 						ImGui::Unindent(10);
 					}
 				}
@@ -1053,11 +1049,11 @@ void GameClient::drawUI()
 			{
 				ImGui::Separator();
 				ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.93f, 0.90f, 0.85f, 1.00f)); // Primary color
-				ImGui::TextUnformatted("PLAYER POSITIONS");
+				ImGui::TextUnformatted(ICON_LC_MAP " PLAYER POSITIONS");
 				ImGui::PopStyleColor();
 
 				// Calculate map size and position
-				const float mapSize = ImGui::GetContentRegionAvail().x - 10;
+				const float mapSize = ImGui::GetContentRegionAvail().x - 15;
 				const float mapPadding = 5.0f;
 				const ImVec2 mapPos = ImGui::GetCursorScreenPos();
 				const ImVec2 mapCenter = ImVec2(mapPos.x + mapSize / 2, mapPos.y + mapSize / 2);
@@ -1174,7 +1170,7 @@ void GameClient::drawUI()
 			ImGui::BeginChild("ChatPanel", ImVec2(ImGui::GetColumnWidth(), ImGui::GetContentRegionAvail().y - 30), true);
 
 			ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.93f, 0.90f, 0.85f, 1.00f)); // Primary color (#EEE5DA)
-			ImGui::TextUnformatted("CHAT");
+			ImGui::TextUnformatted(ICON_LC_MESSAGE_CIRCLE " CHAT");
 			ImGui::PopStyleColor();
 
 			ImGui::Separator();
@@ -1279,7 +1275,7 @@ void GameClient::drawUI()
 			// Begin a group to manage the layout
 			ImGui::BeginGroup();
 
-			// Apply your style if focused
+			// Apply style if focused
 			if (chatFocused && inputEnabled)
 			{
 				ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.25f, 0.24f, 0.24f, 1.00f));
@@ -1295,7 +1291,7 @@ void GameClient::drawUI()
 			}
 
 			ImGui::SameLine();
-			bool sendClicked = ImGui::Button("Send", ImVec2(60, 0)) && inputEnabled;
+			bool sendClicked = ImGui::Button(ICON_LC_SEND, ImVec2(60, 0)) && inputEnabled;
 
 			// End the group
 			ImGui::EndGroup();
@@ -1341,6 +1337,12 @@ void GameClient::drawUI()
 		// Right panel - Controls
 		{
 			ImGui::BeginChild("Controls", ImVec2(ImGui::GetColumnWidth(), ImGui::GetContentRegionAvail().y - 30), true);
+
+			ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.93f, 0.90f, 0.85f, 1.00f)); // Primary color
+			ImGui::TextUnformatted(ICON_LC_SETTINGS " CONTROLS");
+			ImGui::PopStyleColor();
+			ImGui::Separator();
+
 			drawNetworkOptionsUI();
 
 			ImGui::EndChild();
