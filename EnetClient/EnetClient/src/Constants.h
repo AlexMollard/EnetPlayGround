@@ -1,6 +1,6 @@
 #pragma once
 
-#define VERSION "1.0.0"
+#define VERSION "0.1.0"
 #define CREDENTIALS_FILE "client_credentials.dat"
 #define DEBUG_LOG_FILE "client_debug.log"
 #define PING_INTERVAL_MS 5000

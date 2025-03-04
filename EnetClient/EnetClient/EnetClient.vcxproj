@@ -86,6 +86,7 @@
     <ClCompile Include="src\NetworkManager.cpp" />
     <ClCompile Include="src/EnetClient.cpp" />
     <ClCompile Include="src/GameClient.cpp" />
+    <ClCompile Include="src\ThemeManager.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\EnetShared\Logger.h" />
@@ -96,6 +97,7 @@
     <ClInclude Include="src\NetworkManager.h" />
     <ClInclude Include="src/Constants.h" />
     <ClInclude Include="src/GameClient.h" />
+    <ClInclude Include="src\ThemeManager.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

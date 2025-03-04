@@ -60,12 +60,6 @@ bool NetworkManager::connectToServer(const char* address, uint16_t port)
 {
 	std::lock_guard<std::mutex> lock(networkMutex);
 
-	if (isConnected)
-	{
-		logger.warning("Already connected, disconnecting first");
-		disconnect(false);
-	}
-
 	serverAddress = address;
 	serverPort = port;
 

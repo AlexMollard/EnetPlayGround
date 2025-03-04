@@ -165,7 +165,7 @@ int main(int argc, char* argv[])
 	};
 
 	// Configure ImGui style
-	params.callbacks.SetupImGuiStyle = [client]() { client->setupImGuiTheme(); };
+	params.callbacks.SetupImGuiStyle = [client]() { client->applyTheme(); };
 
 	// Initialize the client, but don't connect yet - let the user initiate connection from UI
 	params.callbacks.PostInit = [client]()

@@ -18,7 +18,7 @@
 
 // Constructor
 GameClient::GameClient()
-      : lastUpdateTime(getCurrentTimeMs())
+      : lastUpdateTime(time(0))
 {
 	// Set up console
 	consoleHandle = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -109,6 +109,11 @@ void GameClient::handleServerDisconnection()
 		addChatMessage("System", "Attempting to reconnect...");
 		networkManager->reconnectToServer();
 	}
+}
+
+void GameClient::applyTheme()
+{
+	themeManager.applyTheme();
 }
 
 // Send a chat message
@@ -440,7 +445,7 @@ void GameClient::parseWorldState(const std::string& stateData)
 				it->second.position.x = x;
 				it->second.position.y = y;
 				it->second.position.z = z;
-				it->second.lastSeen = getCurrentTimeMs();
+				it->second.lastSeen = time(0);
 				it->second.status = "active";
 			}
 			else
@@ -452,7 +457,7 @@ void GameClient::parseWorldState(const std::string& stateData)
 				newPlayer.position.x = x;
 				newPlayer.position.y = y;
 				newPlayer.position.z = z;
-				newPlayer.lastSeen = getCurrentTimeMs();
+				newPlayer.lastSeen = time(0);
 				newPlayer.status = "active";
 
 				otherPlayers[id] = newPlayer;
@@ -567,7 +572,7 @@ void GameClient::handleImGuiInput()
 	if (!chatFocused && !io.WantTextInput && connectionState == ConnectionState::Connected)
 	{
 		// Get elapsed time since last frame for smooth movement
-		uint32_t currentTime = getCurrentTimeMs();
+		uint32_t currentTime = time(0);
 		float deltaTime = (currentTime - lastUpdateTime) / 1000.0f; // Convert to seconds
 		lastUpdateTime = currentTime;
 
@@ -695,14 +700,14 @@ void GameClient::updateNetwork()
 	}
 
 	// Get current time for delta calculations
-	uint32_t currentTime = getCurrentTimeMs();
+	uint32_t currentTime = time(0);
 
 	// Use NetworkManager to process packets and handle events
 	networkManager->update(
 	        // Position update callback
 	        [this]()
 	        {
-		        uint32_t currentTime = getCurrentTimeMs();
+		        uint32_t currentTime = time(0);
 		        if (currentTime - lastPositionUpdateTime >= positionUpdateRateMs && authManager->isAuthenticated())
 		        {
 			        networkManager->sendPositionUpdate(myPosition.x, myPosition.y, myPosition.z, lastSentPosition.x, lastSentPosition.y, lastSentPosition.z, useCompressedUpdates, movementThreshold);
@@ -726,22 +731,17 @@ void GameClient::updateNetwork()
 
 void GameClient::drawStatusBar()
 {
-	// gradient status bar
-	ImDrawList* drawList = ImGui::GetWindowDrawList();
-	ImVec2 statusMin = ImGui::GetCursorScreenPos();
-	ImVec2 statusMax = ImVec2(statusMin.x + ImGui::GetContentRegionAvail().x - 10, statusMin.y + 30);
-
 	// Status bar content
 	ImGui::BeginChild("StatusBarContent", ImVec2(ImGui::GetContentRegionAvail().x, 30), false, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
 
 	// Network stats with icons
 	ImGui::SetCursorPos(ImVec2(20, 5));
-	ImGui::TextColored(ImVec4(0.80f, 0.80f, 0.80f, 0.90f), ICON_LC_WIFI " %ums | " ICON_LC_PACKAGE " %u/%u | " ICON_LC_HARD_DRIVE " %u/%u bytes", networkManager->getPing(), networkManager->getPacketsSent(), networkManager->getPacketsReceived(), networkManager->getBytesSent(), networkManager->getBytesReceived());
+	ImGui::TextColored(themeManager.getCurrentTheme().textSecondary, ICON_LC_WIFI " %ums | " ICON_LC_PACKAGE " %u/%u | " ICON_LC_HARD_DRIVE " %u/%u bytes", networkManager->getPing(), networkManager->getPacketsSent(), networkManager->getPacketsReceived(), networkManager->getBytesSent(), networkManager->getBytesReceived());
 
 	// Players online with icon
 	float playerOnlineTextWidth = ImGui::CalcTextSize(ICON_LC_USERS " Players Online: 999").x;
 	ImGui::SameLine(ImGui::GetContentRegionAvail().x - playerOnlineTextWidth - 20);
-	ImGui::TextColored(ImVec4(0.26f, 0.59f, 0.98f, 1.00f), ICON_LC_USERS " Players Online: %zu", otherPlayers.size() + 1); // +1 for self
+	ImGui::TextColored(themeManager.getCurrentTheme().accentPrimary, ICON_LC_USERS " Players Online: %zu", otherPlayers.size() + 1); // +1 for self
 
 	ImGui::EndChild();
 }
@@ -949,7 +949,7 @@ void GameClient::drawLoginScreen()
 {
 	// Center the login window on screen
 	ImGuiIO& io = ImGui::GetIO();
-	ImVec2 windowSize = ImVec2(400, 350); // Using original size to ensure no scrolling
+	ImVec2 windowSize = ImVec2(450, 425);
 	ImVec2 windowPos = ImVec2((io.DisplaySize.x - windowSize.x) * 0.5f, (io.DisplaySize.y - windowSize.y) * 0.5f);
 
 	// Set window position and size
@@ -1055,8 +1055,6 @@ void GameClient::drawLoginScreen()
 		// Error message with better styling
 		if (!loginErrorMessage.empty())
 		{
-			ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.3f, 0.3f, 1.0f));
-
 			// Measure text to decide on centering or wrapping
 			ImVec2 textSize = ImGui::CalcTextSize((ICON_LC_CIRCLE_ALERT " " + loginErrorMessage).c_str());
 			if (textSize.x > contentWidth - 20.0f)
@@ -1073,7 +1071,6 @@ void GameClient::drawLoginScreen()
 				ImGui::Text("%s %s", ICON_LC_CIRCLE_ALERT, loginErrorMessage.c_str());
 			}
 
-			ImGui::PopStyleColor();
 			ImGui::Spacing();
 		}
 
@@ -1115,7 +1112,7 @@ void GameClient::drawRegisterScreen()
 {
 	// Center the register window on screen
 	ImGuiIO& io = ImGui::GetIO();
-	ImVec2 windowSize = ImVec2(400, 400); // Slightly taller than login window
+	ImVec2 windowSize = ImVec2(450, 425);
 	ImVec2 windowPos = ImVec2((io.DisplaySize.x - windowSize.x) * 0.5f, (io.DisplaySize.y - windowSize.y) * 0.5f);
 
 	// Set window position and size
@@ -1203,8 +1200,6 @@ void GameClient::drawRegisterScreen()
 	// Error message with better styling
 	if (!registerErrorMessage.empty())
 	{
-		ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.3f, 0.3f, 1.0f));
-
 		// Measure text to decide on centering or wrapping
 		ImVec2 textSize = ImGui::CalcTextSize((ICON_LC_CIRCLE_ALERT " " + registerErrorMessage).c_str());
 		if (textSize.x > contentWidth - 20.0f)
@@ -1221,7 +1216,6 @@ void GameClient::drawRegisterScreen()
 			ImGui::Text("%s %s", ICON_LC_CIRCLE_ALERT, registerErrorMessage.c_str());
 		}
 
-		ImGui::PopStyleColor();
 		ImGui::Spacing();
 	}
 
@@ -1260,9 +1254,9 @@ void GameClient::drawConnectedUI()
 
 	// Auto-layout with proper responsiveness
 	float availWidth = ImGui::GetContentRegionAvail().x - 20; // Reserve some padding
-	float playersPanelWidth = availWidth * 0.25f;  // 25% for players
-	float chatPanelWidth = availWidth * 0.5f;      // 50% for chat
-	float controlsPanelWidth = availWidth * 0.25f; // 25% for controls
+	float playersPanelWidth = availWidth * 0.25f;             // 25% for players
+	float chatPanelWidth = availWidth * 0.5f;                 // 50% for chat
+	float controlsPanelWidth = availWidth * 0.25f;            // 25% for controls
 
 	// Adjust width based on window size
 	if (availWidth < 1200)
@@ -1306,15 +1300,6 @@ void GameClient::drawHeader()
 	ImVec2 headerMin = ImGui::GetCursorScreenPos();
 	ImVec2 headerMax = ImVec2(headerMin.x + ImGui::GetContentRegionAvail().x - 10, headerMin.y + 80);
 
-	// Gradient background
-	drawList->AddRectFilledMultiColor(headerMin,
-	        headerMax,
-	        ImGui::GetColorU32(ImVec4(0.12f, 0.12f, 0.18f, 1.0f)), // Left color
-	        ImGui::GetColorU32(ImVec4(0.18f, 0.18f, 0.25f, 1.0f)), // Right color
-	        ImGui::GetColorU32(ImVec4(0.16f, 0.16f, 0.22f, 1.0f)), // Bottom right
-	        ImGui::GetColorU32(ImVec4(0.10f, 0.10f, 0.15f, 1.0f))  // Bottom left
-	);
-
 	// Content container
 	ImGui::BeginChild("HeaderContent", ImVec2(ImGui::GetContentRegionAvail().x, 80), false, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
 
@@ -1322,13 +1307,14 @@ void GameClient::drawHeader()
 	ImGui::PushFont(ImGui::GetIO().Fonts->Fonts[1]); // Larger font
 	ImGui::SetCursorPos(ImVec2(20, 15));
 	ImGui::Text("MMO CLIENT");
-	// Same line but centered in the header we want to show the playersname and id
+
+	// Player name centered in the header
 	ImGui::SetCursorPosX((ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize(myPlayerName.c_str()).x) * 0.5f);
-	ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "%s", myPlayerName.c_str(), myPlayerId);
+	ImGui::TextColored(themeManager.getCurrentTheme().textSecondary, "%s", myPlayerName.c_str(), myPlayerId);
 	ImGui::PopFont();
 
 	ImGui::SetCursorPos(ImVec2(20, 50));
-	ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "v%s", VERSION);
+	ImGui::TextColored(themeManager.getCurrentTheme().textSecondary, "v%s", VERSION);
 
 	// Right side - Status with badge
 	float statusWidth = 180;
@@ -1340,7 +1326,7 @@ void GameClient::drawHeader()
 
 	if (connectionInProgress)
 	{
-		statusColor = ImVec4(0.9f, 0.7f, 0.0f, 1.0f); // Amber
+		statusColor = themeManager.getCurrentTheme().statusConnecting; // Amber
 		statusText = "CONNECTING...";
 	}
 	else
@@ -1348,19 +1334,19 @@ void GameClient::drawHeader()
 		switch (connectionState)
 		{
 			case ConnectionState::Connecting:
-				statusColor = ImVec4(0.9f, 0.7f, 0.0f, 1.0f); // Amber
+				statusColor = themeManager.getCurrentTheme().statusConnecting; // Amber
 				statusText = "CONNECTING...";
 				break;
 			case ConnectionState::Authenticating:
-				statusColor = ImVec4(0.9f, 0.7f, 0.0f, 1.0f); // Amber
+				statusColor = themeManager.getCurrentTheme().statusConnecting; // Amber
 				statusText = "AUTHENTICATING...";
 				break;
 			case ConnectionState::Connected:
-				statusColor = ImVec4(0.2f, 0.8f, 0.4f, 1.0f); // Green
+				statusColor = themeManager.getCurrentTheme().statusOnline; // Green
 				statusText = "CONNECTED";
 				break;
 			default:
-				statusColor = ImVec4(0.9f, 0.3f, 0.3f, 1.0f); // Red
+				statusColor = themeManager.getCurrentTheme().statusOffline; // Red
 				statusText = "DISCONNECTED";
 				break;
 		}
@@ -1377,16 +1363,12 @@ void GameClient::drawHeader()
 
 	// Center text in badge
 	ImGui::SetCursorPos(ImVec2(statusPos.x + 10, statusPos.y + 5));
-	ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
-	ImGui::Text("%s", statusText);
-	ImGui::PopStyleColor();
+	ImGui::TextColored(themeManager.getCurrentTheme().textPrimary, "%s", statusText);
 
-	// buttons with icons
+	// Sign Out button with hover effect
 	float buttonWidth = 120;
 	float buttonHeight = 30;
 	ImGui::SetCursorPos(ImVec2(ImGui::GetContentRegionAvail().x - buttonWidth - 15, 45));
-
-	// Sign Out button with hover effect
 	ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 15.0f);
 
 	if (ImGui::Button(ICON_LC_LOG_OUT " Sign Out", ImVec2(buttonWidth, buttonHeight)))
@@ -1395,22 +1377,21 @@ void GameClient::drawHeader()
 	}
 
 	ImGui::PopStyleVar();
-
 	ImGui::EndChild();
 }
 
 void GameClient::drawPlayersPanel(float width, float height)
 {
-	ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 8.0f);
+	const UITheme& theme = themeManager.getCurrentTheme();
+
+	ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, theme.childRounding);
 	ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(20, 20));
 
 	ImGui::BeginChild("PlayersPanel", ImVec2(width, height), true);
 
 	// Panel header with icon
-	ImGui::PushFont(ImGui::GetIO().Fonts->Fonts[0]);                          // Default font
-	ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.26f, 0.59f, 0.98f, 1.00f)); // Accent color
-	ImGui::Text(ICON_LC_USERS " PLAYERS ONLINE");
-	ImGui::PopStyleColor();
+	ImGui::PushFont(ImGui::GetIO().Fonts->Fonts[0]); // Default font
+	ImGui::TextColored(theme.textAccent, ICON_LC_USERS " PLAYERS ONLINE");
 	ImGui::PopFont();
 
 	// separator with gradient
@@ -1419,21 +1400,19 @@ void GameClient::drawPlayersPanel(float width, float height)
 	ImVec2 sepMax = ImVec2(sepMin.x + width - 40, sepMin.y + 1);
 	drawList->AddRectFilledMultiColor(sepMin,
 	        sepMax,
-	        ImGui::GetColorU32(ImVec4(0.26f, 0.59f, 0.98f, 0.7f)), // Left
-	        ImGui::GetColorU32(ImVec4(0.26f, 0.59f, 0.98f, 0.1f)), // Right
-	        ImGui::GetColorU32(ImVec4(0.26f, 0.59f, 0.98f, 0.1f)), // Right
-	        ImGui::GetColorU32(ImVec4(0.26f, 0.59f, 0.98f, 0.7f))  // Left
+	        ImGui::GetColorU32(theme.gradientStart), // Left
+	        ImGui::GetColorU32(theme.gradientEnd),   // Right
+	        ImGui::GetColorU32(theme.gradientEnd),   // Right
+	        ImGui::GetColorU32(theme.gradientStart)  // Left
 	);
 	ImGui::Dummy(ImVec2(0, 10)); // Space after separator
 
 	// Network stats display
 	if (showStats)
 	{
-		ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.80f, 0.78f, 0.74f, 1.00f)); // Muted color
 		ImGui::BeginChild("NetworkStats", ImVec2(width - 40, 45), true);
-		ImGui::TextWrapped("Ping: %ums | Packets: %u/%u | Data: %u/%u bytes", networkManager->getPing(), networkManager->getPacketsSent(), networkManager->getPacketsReceived(), networkManager->getBytesSent(), networkManager->getBytesReceived());
+		ImGui::TextColored(theme.textSecondary, "Ping: %ums | Packets: %u/%u | Data: %u/%u bytes", networkManager->getPing(), networkManager->getPacketsSent(), networkManager->getPacketsReceived(), networkManager->getBytesSent(), networkManager->getBytesReceived());
 		ImGui::EndChild();
-		ImGui::PopStyleColor();
 		ImGui::Spacing();
 	}
 
@@ -1444,7 +1423,7 @@ void GameClient::drawPlayersPanel(float width, float height)
 	std::lock_guard<std::mutex> lock(playersMutex);
 	if (otherPlayers.empty())
 	{
-		ImGui::TextColored(ImVec4(0.80f, 0.78f, 0.74f, 1.00f), ICON_LC_USERS " No other players online");
+		ImGui::TextColored(theme.textSecondary, ICON_LC_USERS " No other players online");
 	}
 	else
 	{
@@ -1465,21 +1444,15 @@ void GameClient::drawPlayersPanel(float width, float height)
 			ImGui::BeginChild(("Player_" + std::to_string(player.id)).c_str(), ImVec2(width - 60, 75), true);
 			isHovered = ImGui::IsItemHovered();
 
-			// Player icon with colored circle
-			ImDrawList* drawList = ImGui::GetWindowDrawList();
-			ImVec2 iconPos = ImGui::GetCursorScreenPos();
-			iconPos.x += 10;
-			iconPos.y += 10;
-
 			// Player name and ID
 			ImGui::SetCursorPos(ImVec2(30, 8));
 			ImGui::TextUnformatted(player.name.c_str());
 			ImGui::SameLine();
-			ImGui::TextColored(ImVec4(0.70f, 0.68f, 0.64f, 1.00f), "(ID: %u)", player.id);
+			ImGui::TextColored(theme.textSecondary, "(ID: %u)", player.id);
 
 			// Position with icon
 			ImGui::SetCursorPos(ImVec2(30, 35));
-			ImGui::TextColored(ImVec4(0.80f, 0.78f, 0.74f, 1.00f), ICON_LC_MAP_PIN " %.1f, %.1f, %.1f", player.position.x, player.position.y, player.position.z);
+			ImGui::TextColored(theme.textSecondary, ICON_LC_MAP_PIN " %.1f, %.1f, %.1f", player.position.x, player.position.y, player.position.z);
 
 			ImGui::EndChild(); // End of card
 
@@ -1490,7 +1463,7 @@ void GameClient::drawPlayersPanel(float width, float height)
 				ImVec2 max = ImGui::GetItemRectMax();
 				drawList->AddRect(ImVec2(min.x - 1, min.y - 1),
 				        ImVec2(max.x + 1, max.y + 1),
-				        ImGui::GetColorU32(ImVec4(0.26f, 0.59f, 0.98f, 1.00f)), // Accent color
+				        ImGui::GetColorU32(theme.accentPrimary), // Accent color
 				        6.0f,
 				        0,
 				        2.0f);
@@ -1508,9 +1481,7 @@ void GameClient::drawPlayersPanel(float width, float height)
 	ImGui::Dummy(ImVec2(0, 5));
 
 	// Map header with gradient separator
-	ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.26f, 0.59f, 0.98f, 1.00f)); // Accent color
-	ImGui::Text(ICON_LC_MAP " PLAYER POSITIONS");
-	ImGui::PopStyleColor();
+	ImGui::TextColored(theme.textAccent, ICON_LC_MAP " PLAYER POSITIONS");
 
 	// Separator with gradient
 	ImDrawList* mapSepDrawList = ImGui::GetWindowDrawList();
@@ -1518,10 +1489,10 @@ void GameClient::drawPlayersPanel(float width, float height)
 	ImVec2 mapSepMax = ImVec2(mapSepMin.x + width - 40, mapSepMin.y + 1);
 	mapSepDrawList->AddRectFilledMultiColor(mapSepMin,
 	        mapSepMax,
-	        ImGui::GetColorU32(ImVec4(0.26f, 0.59f, 0.98f, 0.7f)), // Left
-	        ImGui::GetColorU32(ImVec4(0.26f, 0.59f, 0.98f, 0.1f)), // Right
-	        ImGui::GetColorU32(ImVec4(0.26f, 0.59f, 0.98f, 0.1f)), // Right
-	        ImGui::GetColorU32(ImVec4(0.26f, 0.59f, 0.98f, 0.7f))  // Left
+	        ImGui::GetColorU32(theme.gradientStart), // Left
+	        ImGui::GetColorU32(theme.gradientEnd),   // Right
+	        ImGui::GetColorU32(theme.gradientEnd),   // Right
+	        ImGui::GetColorU32(theme.gradientStart)  // Left
 	);
 	ImGui::Dummy(ImVec2(0, 10)); // Space after separator
 
@@ -1544,14 +1515,14 @@ void GameClient::drawPlayersPanel(float width, float height)
 	// Main map background
 	drawList->AddRectFilled(ImVec2(mapPos.x, mapPos.y),
 	        ImVec2(mapPos.x + mapSize, mapPos.y + mapSize),
-	        ImGui::GetColorU32(ImVec4(0.15f, 0.16f, 0.21f, 1.00f)), // Dark background
-	        10.0f                                                   // Rounded corners
+	        ImGui::GetColorU32(theme.bgTertiary), // Map background
+	        10.0f                                 // Rounded corners
 	);
 
 	// Map border
 	drawList->AddRect(ImVec2(mapPos.x, mapPos.y),
 	        ImVec2(mapPos.x + mapSize, mapPos.y + mapSize),
-	        ImGui::GetColorU32(ImVec4(0.30f, 0.30f, 0.40f, 0.60f)), // Border color
+	        ImGui::GetColorU32(theme.borderPrimary), // Border color
 	        10.0f,
 	        0,
 	        1.5f // Line thickness
@@ -1587,7 +1558,6 @@ void GameClient::drawPlayersPanel(float width, float height)
 
 	// Draw players on the map
 	{
-
 		// Draw local player (yellow dot with glow effect)
 		ImVec2 playerPos = worldToMap(myPosition.x, -myPosition.z);
 
@@ -1597,11 +1567,13 @@ void GameClient::drawPlayersPanel(float width, float height)
 		for (int i = 0; i < numSamples; i++)
 		{
 			float alpha = 0.5f * (1.0f - (float) i / numSamples);
-			drawList->AddCircleFilled(playerPos, 5.0f + i * 0.8f, ImGui::GetColorU32(ImVec4(0.9f, 0.9f, 0.2f, alpha)));
+			ImVec4 glowColor = theme.playerSelf;
+			glowColor.w = alpha;
+			drawList->AddCircleFilled(playerPos, 5.0f + i * 0.8f, ImGui::GetColorU32(glowColor));
 		}
 
 		// Main dot
-		drawList->AddCircleFilled(playerPos, 6.0f, ImGui::GetColorU32(ImVec4(0.9f, 0.9f, 0.2f, 1.0f)));
+		drawList->AddCircleFilled(playerPos, 6.0f, ImGui::GetColorU32(theme.playerSelf));
 		drawList->AddCircle(playerPos, 6.0f, ImGui::GetColorU32(ImVec4(0.0f, 0.0f, 0.0f, 0.5f)), 0, 1.5f);
 
 		// Draw other players with subtle glow
@@ -1611,10 +1583,12 @@ void GameClient::drawPlayersPanel(float width, float height)
 			ImVec2 otherPlayerPos = worldToMap(player.position.x, -player.position.z);
 
 			// Subtle glow
-			drawList->AddCircleFilled(otherPlayerPos, 7.0f, ImGui::GetColorU32(ImVec4(0.4f, 0.8f, 0.4f, 0.3f)));
+			ImVec4 otherGlowColor = theme.playerOthers;
+			otherGlowColor.w = 0.3f;
+			drawList->AddCircleFilled(otherPlayerPos, 7.0f, ImGui::GetColorU32(otherGlowColor));
 
 			// Player dot
-			drawList->AddCircleFilled(otherPlayerPos, 5.0f, ImGui::GetColorU32(ImVec4(0.4f, 0.8f, 0.4f, 1.0f)));
+			drawList->AddCircleFilled(otherPlayerPos, 5.0f, ImGui::GetColorU32(theme.playerOthers));
 			drawList->AddCircle(otherPlayerPos, 5.0f, ImGui::GetColorU32(ImVec4(0.0f, 0.0f, 0.0f, 0.3f)), 0, 1.0f);
 
 			// Tooltip on hover
@@ -1628,7 +1602,7 @@ void GameClient::drawPlayersPanel(float width, float height)
 		}
 	}
 
-	// compass with translucent background
+	// Compass with translucent background
 	float compassRadius = 18.0f;
 	float compassOffset = 25.0f;
 	ImVec2 compassPos = ImVec2(mapPos.x + mapSize - compassOffset, mapPos.y + compassOffset);
@@ -1636,8 +1610,7 @@ void GameClient::drawPlayersPanel(float width, float height)
 	// Compass background with gradient
 	drawList->AddCircleFilled(compassPos, compassRadius + 3.0f, ImGui::GetColorU32(ImVec4(0.15f, 0.15f, 0.15f, 0.7f)));
 
-	// Direction indicators
-	// North (triangle)
+	// Direction indicators - North (triangle)
 	{
 		ImVec2 n1(compassPos.x, compassPos.y - compassRadius + 4);
 		ImVec2 n2(compassPos.x - 4, compassPos.y - compassRadius + 12);
@@ -1670,10 +1643,10 @@ void GameClient::drawPlayersPanel(float width, float height)
 	}
 
 	// Direction text
-	drawList->AddText(ImVec2(compassPos.x - 4, compassPos.y - compassRadius - 16), ImGui::GetColorU32(ImVec4(0.9f, 0.9f, 0.9f, 0.9f)), "N");
-	drawList->AddText(ImVec2(compassPos.x + compassRadius + 4, compassPos.y - 8), ImGui::GetColorU32(ImVec4(0.9f, 0.9f, 0.9f, 0.9f)), "E");
-	drawList->AddText(ImVec2(compassPos.x - 4, compassPos.y + compassRadius + 4), ImGui::GetColorU32(ImVec4(0.9f, 0.9f, 0.9f, 0.9f)), "S");
-	drawList->AddText(ImVec2(compassPos.x - compassRadius - 10, compassPos.y - 8), ImGui::GetColorU32(ImVec4(0.9f, 0.9f, 0.9f, 0.9f)), "W");
+	drawList->AddText(ImVec2(compassPos.x - 4, compassPos.y - compassRadius - 16), ImGui::GetColorU32(theme.textPrimary), "N");
+	drawList->AddText(ImVec2(compassPos.x + compassRadius + 4, compassPos.y - 8), ImGui::GetColorU32(theme.textPrimary), "E");
+	drawList->AddText(ImVec2(compassPos.x - 4, compassPos.y + compassRadius + 4), ImGui::GetColorU32(theme.textPrimary), "S");
+	drawList->AddText(ImVec2(compassPos.x - compassRadius - 10, compassPos.y - 8), ImGui::GetColorU32(theme.textPrimary), "W");
 
 	// Draw legend
 	ImVec2 legendPos = ImVec2(mapPos.x + 15, mapPos.y + mapSize - 45);
@@ -1686,12 +1659,12 @@ void GameClient::drawPlayersPanel(float width, float height)
 	);
 
 	// You legend item
-	drawList->AddCircleFilled(ImVec2(legendPos.x + 8, legendPos.y + 8), 5.0f, ImGui::GetColorU32(ImVec4(0.9f, 0.9f, 0.2f, 1.0f)));
-	drawList->AddText(ImVec2(legendPos.x + 20, legendPos.y), ImGui::GetColorU32(ImVec4(0.9f, 0.9f, 0.9f, 0.9f)), "You");
+	drawList->AddCircleFilled(ImVec2(legendPos.x + 8, legendPos.y + 8), 5.0f, ImGui::GetColorU32(theme.playerSelf));
+	drawList->AddText(ImVec2(legendPos.x + 20, legendPos.y), ImGui::GetColorU32(theme.textPrimary), "You");
 
 	// Other players legend item
-	drawList->AddCircleFilled(ImVec2(legendPos.x + 8, legendPos.y + 25), 5.0f, ImGui::GetColorU32(ImVec4(0.4f, 0.8f, 0.4f, 1.0f)));
-	drawList->AddText(ImVec2(legendPos.x + 20, legendPos.y + 18), ImGui::GetColorU32(ImVec4(0.9f, 0.9f, 0.9f, 0.9f)), "Other players");
+	drawList->AddCircleFilled(ImVec2(legendPos.x + 8, legendPos.y + 25), 5.0f, ImGui::GetColorU32(theme.playerOthers));
+	drawList->AddText(ImVec2(legendPos.x + 20, legendPos.y + 18), ImGui::GetColorU32(theme.textPrimary), "Other players");
 
 	ImGui::EndChild();     // End PlayersPanel
 	ImGui::PopStyleVar(2); // ChildRounding, WindowPadding
@@ -1699,16 +1672,16 @@ void GameClient::drawPlayersPanel(float width, float height)
 
 void GameClient::drawChatPanel(float width, float height)
 {
-	ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 8.0f);
+	const UITheme& theme = themeManager.getCurrentTheme();
+
+	ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, theme.childRounding);
 	ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(20, 20));
 
 	ImGui::BeginChild("ChatPanel", ImVec2(width, height), true);
 
 	// Chat header with icon
-	ImGui::PushFont(ImGui::GetIO().Fonts->Fonts[0]);                          // Default font
-	ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.26f, 0.59f, 0.98f, 1.00f)); // Accent color
-	ImGui::Text(ICON_LC_MESSAGE_CIRCLE " CHAT");
-	ImGui::PopStyleColor();
+	ImGui::PushFont(ImGui::GetIO().Fonts->Fonts[0]); // Default font
+	ImGui::TextColored(theme.textAccent, ICON_LC_MESSAGE_CIRCLE " CHAT");
 	ImGui::PopFont();
 
 	// separator with gradient
@@ -1717,16 +1690,16 @@ void GameClient::drawChatPanel(float width, float height)
 	ImVec2 sepMax = ImVec2(sepMin.x + width - 40, sepMin.y + 1);
 	drawList->AddRectFilledMultiColor(sepMin,
 	        sepMax,
-	        ImGui::GetColorU32(ImVec4(0.26f, 0.59f, 0.98f, 0.7f)), // Left
-	        ImGui::GetColorU32(ImVec4(0.26f, 0.59f, 0.98f, 0.1f)), // Right
-	        ImGui::GetColorU32(ImVec4(0.26f, 0.59f, 0.98f, 0.1f)), // Right
-	        ImGui::GetColorU32(ImVec4(0.26f, 0.59f, 0.98f, 0.7f))  // Left
+	        ImGui::GetColorU32(theme.gradientStart), // Left
+	        ImGui::GetColorU32(theme.gradientEnd),   // Right
+	        ImGui::GetColorU32(theme.gradientEnd),   // Right
+	        ImGui::GetColorU32(theme.gradientStart)  // Left
 	);
 	ImGui::Dummy(ImVec2(0, 10)); // Space after separator
 
 	// Chat messages
 	float messagesHeight = height - 150; // Reserve space for input
-	ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 6.0f);
+	ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, theme.frameRounding);
 	ImGui::BeginChild("ChatMessages", ImVec2(width - 40, messagesHeight), true);
 
 	{
@@ -1742,27 +1715,40 @@ void GameClient::drawChatPanel(float width, float height)
 
 			if (msg.sender == "System" || msg.sender == "Server")
 			{
-				senderColor = ImVec4(0.85f, 0.75f, 0.55f, 1.0f); // Gold for system
+				senderColor = theme.systemMessage; // Gold for system
 				senderIcon = ICON_LC_CIRCLE_ALERT " ";
 			}
 			else if (msg.sender == "You")
 			{
-				senderColor = ImVec4(0.26f, 0.59f, 0.98f, 1.0f); // Accent blue for self
+				senderColor = theme.accentPrimary; // Accent blue for self
 				senderIcon = ICON_LC_USER " ";
 			}
 			else
 			{
-				senderColor = ImVec4(0.4f, 0.8f, 0.4f, 1.0f); // Green for others
+				senderColor = theme.playerOthers; // Green for others
 				senderIcon = ICON_LC_USER " ";
 			}
 
 			// Message bubble style
 			ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(10, 8));
 			ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 10.0f);
-			ImGui::PushStyleColor(ImGuiCol_ChildBg,
-			        (msg.sender == "You") ? ImVec4(0.23f, 0.35f, 0.48f, 0.5f) : // Light blue for your messages
-			                ImVec4(0.20f, 0.20f, 0.25f, 0.7f)                   // Dark for others
-			);
+
+			// Set background color based on sender
+			ImVec4 bubbleBgColor;
+			if (msg.sender == "You")
+			{
+				// Your messages
+				bubbleBgColor = theme.accentSecondary;
+				bubbleBgColor.w = 0.5f; // Semi-transparent
+			}
+			else
+			{
+				// Others' messages
+				bubbleBgColor = theme.bgTertiary;
+				bubbleBgColor.w = 0.7f; // Semi-transparent
+			}
+
+			ImGui::PushStyleColor(ImGuiCol_ChildBg, bubbleBgColor);
 
 			// Begin message bubble
 			ImGui::BeginChild(("Msg" + std::to_string(msg.timestamp)).c_str(), ImVec2(width - 80, 0), ImGuiChildFlags_AlwaysAutoResize | ImGuiChildFlags_AutoResizeY);
@@ -1773,7 +1759,7 @@ void GameClient::drawChatPanel(float width, float height)
 			ImGui::Indent(16.0f);
 
 			// Print timestamp in muted color
-			ImGui::TextColored(ImVec4(0.70f, 0.68f, 0.64f, 0.80f), "%s", timeStr.c_str());
+			ImGui::TextColored(theme.textSecondary, "%s", timeStr.c_str());
 
 			// Print sender name with icon and color
 			ImGui::TextColored(senderColor, "%s%s:", senderIcon.c_str(), msg.sender.c_str());
@@ -1794,10 +1780,7 @@ void GameClient::drawChatPanel(float width, float height)
 			ImGui::PopStyleVar(2); // FramePadding, FrameRounding
 
 			// Make sure the next bubble starts right at the end of this one
-			// We dont want to let imgui handle the spacing here as it may add too much
-			// So we call the setnextitemposition manually
 			ImGui::SetCursorPosY(ImGui::GetCursorPosY());
-			
 		}
 
 		// Auto-scroll to bottom if not manually scrolled
@@ -1839,7 +1822,7 @@ void GameClient::drawChatPanel(float width, float height)
 
 	if (chatFocused && inputEnabled)
 	{
-		ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.23f, 0.23f, 0.30f, 1.00f));
+		ImGui::PushStyleColor(ImGuiCol_FrameBg, theme.bgInput);
 	}
 
 	// Chat input field
@@ -1856,14 +1839,8 @@ void GameClient::drawChatPanel(float width, float height)
 
 	ImGui::SameLine();
 
-	// Send button with styling
-	ImGui::PushStyleColor(ImGuiCol_Button, inputEnabled ? ImVec4(0.26f, 0.59f, 0.98f, 0.80f) : ImVec4(0.26f, 0.59f, 0.98f, 0.40f));
-	ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.30f, 0.63f, 1.0f, 1.0f));
-	ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.20f, 0.51f, 0.90f, 1.0f));
-
 	bool sendClicked = ImGui::Button(ICON_LC_SEND " Send", ImVec2(buttonWidth, 0)) && inputEnabled;
 
-	ImGui::PopStyleColor(3);
 	ImGui::PopStyleVar(2); // FramePadding, FrameRounding
 
 	if (!inputEnabled)
@@ -1877,32 +1854,22 @@ void GameClient::drawChatPanel(float width, float height)
 		processChatInput();
 	}
 
-	// Helper text
-	if (strlen(chatInputBuffer) == 0 && !ImGui::IsItemActive())
-	{
-		float textWidth = ImGui::CalcTextSize("Type a message...").x;
-		float textX = ImGui::GetItemRectMin().x - availableWidth;
-		float textY = ImGui::GetItemRectMin().y + 12;
-
-		ImGui::GetWindowDrawList()->AddText(ImVec2(textX, textY), ImGui::GetColorU32(ImVec4(0.60f, 0.60f, 0.60f, 0.50f)), "Type a message...");
-	}
-
 	ImGui::EndChild();     // End ChatPanel
 	ImGui::PopStyleVar(2); // ChildRounding, WindowPadding
 }
 
 void GameClient::drawControlsPanel(float width, float height)
 {
+	const UITheme& theme = themeManager.getCurrentTheme();
+
 	ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 8.0f);
 	ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(20, 20));
 
 	ImGui::BeginChild("ControlsPanel", ImVec2(width, height), true);
 
 	// Panel header with icon
-	ImGui::PushFont(ImGui::GetIO().Fonts->Fonts[0]);                          // Default font
-	ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.26f, 0.59f, 0.98f, 1.00f)); // Accent color
-	ImGui::Text(ICON_LC_SETTINGS " CONTROLS");
-	ImGui::PopStyleColor();
+	ImGui::PushFont(ImGui::GetIO().Fonts->Fonts[0]); // Default font
+	ImGui::TextColored(theme.textAccent, ICON_LC_SETTINGS " CONTROLS");
 	ImGui::PopFont();
 
 	// separator with gradient
@@ -1911,27 +1878,28 @@ void GameClient::drawControlsPanel(float width, float height)
 	ImVec2 sepMax = ImVec2(sepMin.x + width - 40, sepMin.y + 1);
 	drawList->AddRectFilledMultiColor(sepMin,
 	        sepMax,
-	        ImGui::GetColorU32(ImVec4(0.26f, 0.59f, 0.98f, 0.7f)), // Left
-	        ImGui::GetColorU32(ImVec4(0.26f, 0.59f, 0.98f, 0.1f)), // Right
-	        ImGui::GetColorU32(ImVec4(0.26f, 0.59f, 0.98f, 0.1f)), // Right
-	        ImGui::GetColorU32(ImVec4(0.26f, 0.59f, 0.98f, 0.7f))  // Left
+	        ImGui::GetColorU32(theme.gradientStart), // Left
+	        ImGui::GetColorU32(theme.gradientEnd),   // Right
+	        ImGui::GetColorU32(theme.gradientEnd),   // Right
+	        ImGui::GetColorU32(theme.gradientStart)  // Left
 	);
 	ImGui::Dummy(ImVec2(0, 10)); // Space after separator
 
 	// Draw the controls UI with styling
-	drawNetworkOptionsUI();
+	drawNetworkOptionsUI(width, height);
 
 	ImGui::EndChild();     // End ControlsPanel
 	ImGui::PopStyleVar(2); // ChildRounding, WindowPadding
 }
 
-void GameClient::drawNetworkOptionsUI()
+void GameClient::drawNetworkOptionsUI(float width, float height)
 {
+	const UITheme& theme = themeManager.getCurrentTheme();
+
 	// Network settings
 	ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(10, 8));
 	ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(10, 15));
 
-	
 	{
 		// Position update rate
 		int updateRate = positionUpdateRateMs;
@@ -1978,7 +1946,17 @@ void GameClient::drawNetworkOptionsUI()
 		// Stats display
 		if (showStats)
 		{
-			ImGui::Separator();
+			ImDrawList* drawList = ImGui::GetWindowDrawList();
+			ImVec2 sepMin = ImGui::GetCursorScreenPos();
+			ImVec2 sepMax = ImVec2(sepMin.x + width - 40, sepMin.y + 1);
+			drawList->AddRectFilledMultiColor(sepMin,
+			        sepMax,
+			        ImGui::GetColorU32(theme.gradientStart), // Left
+			        ImGui::GetColorU32(theme.gradientEnd),   // Right
+			        ImGui::GetColorU32(theme.gradientEnd),   // Right
+			        ImGui::GetColorU32(theme.gradientStart)  // Left
+			);
+			ImGui::Dummy(ImVec2(0, 10)); // Space after separator
 			ImGui::Text(ICON_LC_CHART_SPLINE " Bandwidth Stats");
 			ImGui::Text("Position Updates: %d/sec", positionUpdateRateMs > 0 ? (1000 / positionUpdateRateMs) : 0);
 			// Calculate average bandwidth for position updates
@@ -1994,10 +1972,18 @@ void GameClient::drawNetworkOptionsUI()
 
 	// Section: Display Options
 	{
-		ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.85f, 0.85f, 0.85f, 1.0f));
-		ImGui::Text(ICON_LC_MONITOR " Display Options");
-		ImGui::PopStyleColor();
-		ImGui::Separator();
+		ImGui::TextColored(theme.textAccent, ICON_LC_MONITOR " Display Options");
+		ImDrawList* drawList = ImGui::GetWindowDrawList();
+		ImVec2 sepMin = ImGui::GetCursorScreenPos();
+		ImVec2 sepMax = ImVec2(sepMin.x + width - 40, sepMin.y + 1);
+		drawList->AddRectFilledMultiColor(sepMin,
+		        sepMax,
+		        ImGui::GetColorU32(theme.gradientStart), // Left
+		        ImGui::GetColorU32(theme.gradientEnd),   // Right
+		        ImGui::GetColorU32(theme.gradientEnd),   // Right
+		        ImGui::GetColorU32(theme.gradientStart)  // Left
+		);
+		ImGui::Dummy(ImVec2(0, 10)); // Space after separator
 		ImGui::Spacing();
 
 		// Show Stats Checkbox
@@ -2013,38 +1999,35 @@ void GameClient::drawNetworkOptionsUI()
 
 	// Section: Actions
 	{
-		ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.85f, 0.85f, 0.85f, 1.0f));
-		ImGui::Text(ICON_LC_ACTIVITY " Actions");
-		ImGui::PopStyleColor();
-		ImGui::Separator();
+		ImGui::TextColored(theme.textAccent, ICON_LC_ACTIVITY " Actions");
+		ImDrawList* drawList = ImGui::GetWindowDrawList();
+		ImVec2 sepMin = ImGui::GetCursorScreenPos();
+		ImVec2 sepMax = ImVec2(sepMin.x + width - 40, sepMin.y + 1);
+		drawList->AddRectFilledMultiColor(sepMin,
+		        sepMax,
+		        ImGui::GetColorU32(theme.gradientStart), // Left
+		        ImGui::GetColorU32(theme.gradientEnd),   // Right
+		        ImGui::GetColorU32(theme.gradientEnd),   // Right
+		        ImGui::GetColorU32(theme.gradientStart)  // Left
+		);
+		ImGui::Dummy(ImVec2(0, 10)); // Space after separator
 		ImGui::Spacing();
 
 		// button styling
 		ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 4.0f);
 
 		// Chat Clear button
-		ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.30f, 0.40f, 0.60f, 0.80f));
-		ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.35f, 0.45f, 0.65f, 1.0f));
-		ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.25f, 0.35f, 0.55f, 1.0f));
-
 		if (ImGui::Button(ICON_LC_X " Clear Chat", ImVec2(-1, 35)))
 		{
 			clearChatMessages();
 		}
 
-		ImGui::PopStyleColor(3);
-
 		// Exit button
-		ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.80f, 0.30f, 0.30f, 0.80f));
-		ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.90f, 0.40f, 0.40f, 1.0f));
-		ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.70f, 0.25f, 0.25f, 1.0f));
-
 		if (ImGui::Button(ICON_LC_LOG_OUT " Exit Application", ImVec2(-1, 35)))
 		{
 			shouldExit = true;
 		}
 
-		ImGui::PopStyleColor(3);
 		ImGui::PopStyleVar();
 	}
 
@@ -2061,8 +2044,13 @@ void GameClient::drawUI()
 	ImGui::SetNextWindowPos(viewport->WorkPos);
 	ImGui::SetNextWindowSize(viewport->WorkSize);
 
+	// Disable rounding for full window
+	ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+
 	ImGui::Begin("MMO Client", nullptr, window_flags);
 
+	ImGui::PopStyleVar();
+	
 	// Check connection state and draw appropriate UI
 	if ((connectionState == ConnectionState::LoginScreen || connectionState == ConnectionState::RegisterScreen || connectionState == ConnectionState::Connecting || connectionState == ConnectionState::Authenticating) && !connectionInProgress)
 	{
@@ -2087,90 +2075,4 @@ void GameClient::drawUI()
 	{
 		HelloImGui::GetRunnerParams()->appShallExit = true;
 	}
-}
-
-// Get current time in milliseconds
-uint32_t GameClient::getCurrentTimeMs()
-{
-	return static_cast<uint32_t>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count());
-}
-
-void GameClient::setupImGuiTheme()
-{
-	ImGuiStyle& style = ImGui::GetStyle();
-
-	// spacing and rounding
-	style.WindowPadding = ImVec2(15, 15);
-	style.FramePadding = ImVec2(10, 7);
-	style.ItemSpacing = ImVec2(12, 8);
-	style.ItemInnerSpacing = ImVec2(8, 6);
-	style.ScrollbarSize = 15;
-	style.GrabMinSize = 5;
-
-	// Rounded corners throughout the UI
-	style.WindowRounding = 12.0f;
-	style.ChildRounding = 8.0f;
-	style.FrameRounding = 6.0f;
-	style.PopupRounding = 6.0f;
-	style.ScrollbarRounding = 10.0f;
-	style.GrabRounding = 6.0f;
-	style.TabRounding = 6.0f;
-
-	// borders
-	style.SeparatorTextBorderSize = 1.0f;
-	style.ChildBorderSize = 1.0f;
-	style.FrameBorderSize = 0.0f;
-	style.PopupBorderSize = 1.0f;
-	style.TabBorderSize = 0.0f;
-
-	// dark color scheme
-	ImVec4* colors = style.Colors;
-	colors[ImGuiCol_Text] = ImVec4(0.95f, 0.95f, 0.95f, 1.00f); // Bright text
-	colors[ImGuiCol_TextDisabled] = ImVec4(0.60f, 0.60f, 0.60f, 1.00f);
-	colors[ImGuiCol_WindowBg] = ImVec4(0.12f, 0.12f, 0.16f, 1.00f); // Dark background with slight blue tint
-	colors[ImGuiCol_ChildBg] = ImVec4(0.15f, 0.15f, 0.20f, 1.00f);
-	colors[ImGuiCol_PopupBg] = ImVec4(0.11f, 0.11f, 0.14f, 0.94f);
-	colors[ImGuiCol_Border] = ImVec4(0.25f, 0.25f, 0.30f, 0.50f);
-	colors[ImGuiCol_BorderShadow] = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
-	colors[ImGuiCol_FrameBg] = ImVec4(0.20f, 0.20f, 0.26f, 1.00f);
-	colors[ImGuiCol_FrameBgHovered] = ImVec4(0.25f, 0.25f, 0.32f, 1.00f);
-	colors[ImGuiCol_FrameBgActive] = ImVec4(0.30f, 0.30f, 0.38f, 1.00f);
-	colors[ImGuiCol_TitleBg] = ImVec4(0.12f, 0.12f, 0.16f, 1.00f);
-	colors[ImGuiCol_TitleBgActive] = ImVec4(0.15f, 0.15f, 0.20f, 1.00f);
-	colors[ImGuiCol_TitleBgCollapsed] = ImVec4(0.00f, 0.00f, 0.00f, 0.51f);
-	colors[ImGuiCol_MenuBarBg] = ImVec4(0.15f, 0.15f, 0.20f, 1.00f);
-	colors[ImGuiCol_ScrollbarBg] = ImVec4(0.10f, 0.10f, 0.13f, 0.53f);
-	colors[ImGuiCol_ScrollbarGrab] = ImVec4(0.31f, 0.31f, 0.40f, 1.00f);
-	colors[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.41f, 0.41f, 0.50f, 1.00f);
-	colors[ImGuiCol_ScrollbarGrabActive] = ImVec4(0.51f, 0.51f, 0.60f, 1.00f);
-	colors[ImGuiCol_CheckMark] = ImVec4(0.26f, 0.59f, 0.98f, 1.00f); // Accent blue for checks
-	colors[ImGuiCol_SliderGrab] = ImVec4(0.24f, 0.52f, 0.88f, 1.00f);
-	colors[ImGuiCol_SliderGrabActive] = ImVec4(0.26f, 0.59f, 0.98f, 1.00f);
-	colors[ImGuiCol_Button] = ImVec4(0.26f, 0.59f, 0.98f, 0.40f);        // Semi-transparent accent for buttons
-	colors[ImGuiCol_ButtonHovered] = ImVec4(0.26f, 0.59f, 0.98f, 1.00f); // Full accent on hover
-	colors[ImGuiCol_ButtonActive] = ImVec4(0.06f, 0.53f, 0.98f, 1.00f);  // Darker accent when pressed
-	colors[ImGuiCol_Header] = ImVec4(0.26f, 0.59f, 0.98f, 0.31f);
-	colors[ImGuiCol_HeaderHovered] = ImVec4(0.26f, 0.59f, 0.98f, 0.80f);
-	colors[ImGuiCol_HeaderActive] = ImVec4(0.26f, 0.59f, 0.98f, 1.00f);
-	colors[ImGuiCol_Separator] = ImVec4(0.30f, 0.30f, 0.38f, 0.50f);
-	colors[ImGuiCol_SeparatorHovered] = ImVec4(0.30f, 0.30f, 0.38f, 0.78f);
-	colors[ImGuiCol_SeparatorActive] = ImVec4(0.30f, 0.30f, 0.38f, 1.00f);
-	colors[ImGuiCol_ResizeGrip] = ImVec4(0.26f, 0.59f, 0.98f, 0.20f);
-	colors[ImGuiCol_ResizeGripHovered] = ImVec4(0.26f, 0.59f, 0.98f, 0.67f);
-	colors[ImGuiCol_ResizeGripActive] = ImVec4(0.26f, 0.59f, 0.98f, 0.95f);
-	colors[ImGuiCol_Tab] = ImVec4(0.18f, 0.18f, 0.23f, 0.95f);
-	colors[ImGuiCol_TabHovered] = ImVec4(0.26f, 0.59f, 0.98f, 0.80f);
-	colors[ImGuiCol_TabActive] = ImVec4(0.20f, 0.41f, 0.68f, 1.00f);
-	colors[ImGuiCol_TabUnfocused] = ImVec4(0.15f, 0.15f, 0.19f, 1.00f);
-	colors[ImGuiCol_TabUnfocusedActive] = ImVec4(0.18f, 0.18f, 0.23f, 1.00f);
-	colors[ImGuiCol_PlotLines] = ImVec4(0.61f, 0.61f, 0.61f, 1.00f);
-	colors[ImGuiCol_PlotLinesHovered] = ImVec4(1.00f, 0.43f, 0.35f, 1.00f);
-	colors[ImGuiCol_PlotHistogram] = ImVec4(0.90f, 0.70f, 0.00f, 1.00f);
-	colors[ImGuiCol_PlotHistogramHovered] = ImVec4(1.00f, 0.60f, 0.00f, 1.00f);
-	colors[ImGuiCol_TextSelectedBg] = ImVec4(0.26f, 0.59f, 0.98f, 0.35f);
-	colors[ImGuiCol_DragDropTarget] = ImVec4(1.00f, 1.00f, 0.00f, 0.90f);
-	colors[ImGuiCol_NavHighlight] = ImVec4(0.26f, 0.59f, 0.98f, 1.00f);
-	colors[ImGuiCol_NavWindowingHighlight] = ImVec4(1.00f, 1.00f, 1.00f, 0.70f);
-	colors[ImGuiCol_NavWindowingDimBg] = ImVec4(0.80f, 0.80f, 0.80f, 0.20f);
-	colors[ImGuiCol_ModalWindowDimBg] = ImVec4(0.00f, 0.00f, 0.00f, 0.70f);
 }

@@ -13,6 +13,7 @@
 #include "AuthManager.h"
 #include "Logger.h"
 #include "NetworkManager.h"
+#include "ThemeManager.h"
 #include <corecrt.h>
 
 //=============================================================================
@@ -128,11 +129,6 @@ public:
 	void drawUI();
 
 	/**
-     * Set up ImGui theme
-     */
-	void setupImGuiTheme();
-
-	/**
      * Check if client is in connected state
      * @return True if fully connected
      */
@@ -145,6 +141,11 @@ public:
 	{
 		return logger;
 	}
+
+	/**
+	 * Calls the apply theme function from the theme manager
+	 */
+	void applyTheme();
 
 private:
 	//-------------------------------------------------------------------------
@@ -215,6 +216,9 @@ private:
 	// Utility objects
 	HANDLE consoleHandle;
 
+	// Themes 
+	ThemeManager themeManager;
+
 	//-------------------------------------------------------------------------
 	// PRIVATE METHODS
 	//-------------------------------------------------------------------------
@@ -262,7 +266,7 @@ private:
 	/**
      * Draw the network settings the sit in the right siude panel
      */
-	void drawNetworkOptionsUI();
+	void drawNetworkOptionsUI(float width, float height);
 
 	/**
      * Draw bottom status bar or footer
@@ -342,10 +346,4 @@ private:
      * Handle server disconnection
      */
 	void handleServerDisconnection();
-
-	/**
-     * Get current time in milliseconds
-     * @return Current time in milliseconds
-     */
-	uint32_t getCurrentTimeMs();
 };
