@@ -8,7 +8,7 @@
 NetworkManager::NetworkManager(Logger& logger)
       : logger(logger)
 {
-	logger.log("Initializing NetworkManager");
+	logger.debug("Initializing NetworkManager");
 }
 
 NetworkManager::~NetworkManager()
@@ -23,17 +23,17 @@ NetworkManager::~NetworkManager()
 		enet_deinitialize();
 	}
 
-	logger.log("NetworkManager destroyed");
+	logger.debug("NetworkManager destroyed");
 }
 
 bool NetworkManager::initialize()
 {
-	logger.log("Initializing ENet");
+	logger.debug("Initializing ENet");
 
 	// Initialize ENet
 	if (enet_initialize() != 0)
 	{
-		logger.logError("Failed to initialize ENet");
+		logger.error("Failed to initialize ENet");
 		return false;
 	}
 
@@ -47,12 +47,12 @@ bool NetworkManager::initialize()
 
 	if (client == nullptr)
 	{
-		logger.logError("Failed to create ENet client host");
+		logger.error("Failed to create ENet client host");
 		enet_deinitialize();
 		return false;
 	}
 
-	logger.log("NetworkManager initialized successfully");
+	logger.debug("NetworkManager initialized successfully");
 	return true;
 }
 
@@ -62,7 +62,7 @@ bool NetworkManager::connectToServer(const char* address, uint16_t port)
 
 	if (isConnected)
 	{
-		logger.log("Already connected, disconnecting first");
+		logger.warning("Already connected, disconnecting first");
 		disconnect(false);
 	}
 
@@ -74,14 +74,14 @@ bool NetworkManager::connectToServer(const char* address, uint16_t port)
 	enet_address_set_host(&enetAddress, address);
 	enetAddress.port = port;
 
-	logger.log("Connecting to server at " + std::string(address) + ":" + std::to_string(port) + "...");
+	logger.debug("Connecting to server at " + std::string(address) + ":" + std::to_string(port) + "...");
 
 	// Connect to the server
 	server = enet_host_connect(client, &enetAddress, 2, 0);
 
 	if (server == nullptr)
 	{
-		logger.logError("Failed to initiate connection to server");
+		logger.error("Failed to initiate connection to server");
 		return false;
 	}
 
@@ -102,7 +102,7 @@ bool NetworkManager::connectToServer(const char* address, uint16_t port)
 			{
 				isConnected = true;
 				lastNetworkActivity = getCurrentTimeMs();
-				logger.log("Connected to server at " + std::string(address) + ":" + std::to_string(port), true);
+				logger.debug("Connected to server at " + std::string(address) + ":" + std::to_string(port));
 				return true;
 			}
 			else if (event.type == ENET_EVENT_TYPE_RECEIVE)
@@ -113,7 +113,7 @@ bool NetworkManager::connectToServer(const char* address, uint16_t port)
 		}
 		else if (result < 0)
 		{
-			logger.logError("Error while connecting: " + std::to_string(result));
+			logger.error("Error while connecting: " + std::to_string(result));
 			enet_peer_reset(server);
 			server = nullptr;
 			return false;
@@ -121,7 +121,7 @@ bool NetworkManager::connectToServer(const char* address, uint16_t port)
 	}
 
 	// Connection timed out
-	logger.logError("Connection to server failed (timeout)");
+	logger.error("Connection to server failed (timeout)");
 	enet_peer_reset(server);
 	server = nullptr;
 	return false;
@@ -135,7 +135,7 @@ void NetworkManager::disconnect(bool showMessage)
 	{
 		if (showMessage)
 		{
-			logger.log("Disconnecting from server...", true);
+			logger.info("Disconnecting from server...");
 		}
 
 		// If we're initiating the disconnect, send a proper disconnect packet
@@ -153,7 +153,7 @@ void NetworkManager::disconnect(bool showMessage)
 			{
 				if (event.type == ENET_EVENT_TYPE_DISCONNECT)
 				{
-					logger.log("Disconnection acknowledged by server");
+					logger.debug("Disconnection acknowledged by server");
 					disconnected = true;
 					break;
 				}
@@ -170,7 +170,7 @@ void NetworkManager::disconnect(bool showMessage)
 		// Force disconnect if not acknowledged
 		if (!disconnected)
 		{
-			logger.log("Forcing disconnection after timeout");
+			logger.warning("Forcing disconnection after timeout");
 			enet_peer_reset(server);
 		}
 
@@ -189,16 +189,16 @@ bool NetworkManager::reconnectToServer()
 		disconnect(false);
 	}
 
-	logger.log("Attempting to reconnect to server...", true);
+	logger.info("Attempting to reconnect to server...");
 	reconnecting = true;
 
 	for (int attempt = 1; attempt <= RECONNECT_ATTEMPTS; attempt++)
 	{
-		logger.log("Reconnection attempt " + std::to_string(attempt) + " of " + std::to_string(RECONNECT_ATTEMPTS));
+		logger.debug("Reconnection attempt " + std::to_string(attempt) + " of " + std::to_string(RECONNECT_ATTEMPTS));
 
 		if (connectToServer(serverAddress.c_str(), serverPort))
 		{
-			logger.log("Reconnection successful!", true);
+			logger.info("Reconnection successful!");
 			reconnecting = false;
 			return true;
 		}
@@ -207,7 +207,7 @@ bool NetworkManager::reconnectToServer()
 		std::this_thread::sleep_for(std::chrono::seconds(2));
 	}
 
-	logger.logError("Failed to reconnect after " + std::to_string(RECONNECT_ATTEMPTS) + " attempts");
+	logger.error("Failed to reconnect after " + std::to_string(RECONNECT_ATTEMPTS) + " attempts");
 	reconnecting = false;
 	return false;
 }
@@ -259,7 +259,7 @@ void NetworkManager::sendPacket(const std::string& message, bool reliable)
 	}
 	else
 	{
-		logger.logError("Failed to send packet: " + message);
+		logger.error("Failed to send packet: " + message);
 		enet_packet_destroy(packet); // We need to destroy the packet if send failed
 	}
 }
@@ -358,7 +358,7 @@ void NetworkManager::update(const std::function<void()>& updatePositionCallback,
 					break;
 
 				case ENET_EVENT_TYPE_DISCONNECT:
-					logger.logError("Disconnected from server");
+					logger.error("Disconnected from server");
 					isConnected = false;
 					server = nullptr;
 
@@ -413,17 +413,15 @@ void NetworkManager::sendPing()
 		}
 	}
 
-	// Do these actions outside the lock
 	if (shouldSendPing)
 	{
 		std::string pingMsg = "PING:" + std::to_string(currentTime);
 		sendPacket(pingMsg, false); // Using unreliable for pings
-		logger.log("Sent ping at timestamp " + std::to_string(currentTime));
 	}
 
 	if (shouldLogTimeout)
 	{
-		logger.logError("Ping response timeout - Server may have disconnected");
+		logger.error("Ping response timeout - Server may have disconnected");
 	}
 }
 
@@ -441,7 +439,7 @@ void NetworkManager::checkConnectionHealth(const std::function<void()>& disconne
 		// Check if we've received any responses from server recently
 		if (currentTime - lastNetworkActivity > serverResponseTimeout)
 		{
-			logger.logError("No server activity for " + std::to_string(serverResponseTimeout / 1000) + " seconds");
+			logger.error("No server activity for " + std::to_string(serverResponseTimeout / 1000) + " seconds");
 			isConnected = false;
 			shouldDisconnect = true;
 		}

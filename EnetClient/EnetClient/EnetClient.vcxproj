@@ -52,6 +52,7 @@
       <LanguageStandard>stdcpp20</LanguageStandard>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <AdditionalIncludeDirectories>$(SolutionDir)..\EnetShared;src</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -69,6 +70,7 @@
       <LanguageStandard>stdcpp20</LanguageStandard>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <AdditionalIncludeDirectories>$(SolutionDir)..\EnetShared;src</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -78,18 +80,20 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="..\..\EnetShared\Logger.cpp" />
+    <ClCompile Include="..\..\EnetShared\Utils.cpp" />
     <ClCompile Include="src\AuthManager.cpp" />
-    <ClCompile Include="src\Logger.cpp" />
     <ClCompile Include="src\NetworkManager.cpp" />
     <ClCompile Include="src/EnetClient.cpp" />
     <ClCompile Include="src/GameClient.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\..\EnetShared\Logger.h" />
+    <ClInclude Include="..\..\EnetShared\Utils.h" />
     <ClInclude Include="src\AuthManager.h" />
     <ClInclude Include="src\NetworkManager.h" />
     <ClInclude Include="src/Constants.h" />
     <ClInclude Include="src/GameClient.h" />
-    <ClInclude Include="src/Logger.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

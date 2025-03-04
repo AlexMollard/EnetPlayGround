@@ -10,37 +10,6 @@
 // Main function
 int main(int argc, char* argv[])
 {
-	// Parse command line arguments
-	std::string serverAddress = DEFAULT_SERVER;
-	uint16_t serverPort = DEFAULT_PORT;
-	bool debugMode = false;
-
-	for (int i = 1; i < argc; i++)
-	{
-		std::string arg = argv[i];
-		if (arg == "-server" && i + 1 < argc)
-		{
-			serverAddress = argv[++i];
-		}
-		else if (arg == "-port" && i + 1 < argc)
-		{
-			serverPort = static_cast<uint16_t>(std::stoi(argv[++i]));
-		}
-		else if (arg == "-debug")
-		{
-			debugMode = true;
-		}
-		else if (arg == "-help" || arg == "-h" || arg == "--help")
-		{
-			std::cout << "MMO Client Usage:\n";
-			std::cout << "  -server <address>  Server address (default: " << DEFAULT_SERVER << ")\n";
-			std::cout << "  -port <port>       Server port (default: " << DEFAULT_PORT << ")\n";
-			std::cout << "  -debug             Enable debug mode\n";
-			std::cout << "  -help              Show this help\n";
-			return 0;
-		}
-	}
-
 	// Initialize ImGui parameters first
 	HelloImGui::RunnerParams params;
 
@@ -58,13 +27,7 @@ int main(int argc, char* argv[])
 	params.imGuiWindowParams.showStatusBar = false;
 
 	// Create game client - pass command line parameters to constructor
-	std::shared_ptr<GameClient> client = std::make_shared<GameClient>("", "", debugMode);
-
-	// Set server address and port from command line
-	if (serverAddress != DEFAULT_SERVER)
-	{
-		// We'll let the user set this in the login UI
-	}
+	std::shared_ptr<GameClient> client = std::make_shared<GameClient>();
 
 	// Configure ImGui style
 	params.callbacks.SetupImGuiStyle = [client]() { client->setupImGuiTheme(); };

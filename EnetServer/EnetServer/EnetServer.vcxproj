@@ -51,6 +51,7 @@
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
+      <AdditionalIncludeDirectories>$(SolutionDir)..\EnetShared;src</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -67,6 +68,7 @@
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
+      <AdditionalIncludeDirectories>$(SolutionDir)..\EnetShared;src</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -76,7 +78,18 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="src/server.cpp" />
+    <ClCompile Include="..\..\EnetShared\Logger.cpp" />
+    <ClCompile Include="..\..\EnetShared\Utils.cpp" />
+    <ClCompile Include="src\SpatialGrid.cpp" />
+    <ClCompile Include="src\main.cpp" />
+    <ClCompile Include="src\Server.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\..\EnetShared\Logger.h" />
+    <ClInclude Include="..\..\EnetShared\Utils.h" />
+    <ClInclude Include="src\SpatialGrid.h" />
+    <ClInclude Include="src\Constants.h" />
+    <ClInclude Include="src\Server.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

@@ -90,9 +90,8 @@ public:
      * Constructor
      * @param playerName Optional player name
      * @param password Optional password
-     * @param debugMode Enable debug mode
      */
-	GameClient(const std::string& playerName = "", const std::string& password = "", bool debugMode = true);
+	GameClient();
 
 	/**
      * Destructor

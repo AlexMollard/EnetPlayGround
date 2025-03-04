@@ -15,14 +15,13 @@
 #include "Constants.h"
 
 // Constructor
-GameClient::GameClient(const std::string& playerName, const std::string& password, bool debugMode)
-      : myPlayerName(playerName), myPassword(password), logger(debugMode), lastUpdateTime(getCurrentTimeMs())
+GameClient::GameClient() : lastUpdateTime(getCurrentTimeMs())
 {
 	// Set up console
 	consoleHandle = GetStdHandle(STD_OUTPUT_HANDLE);
 	if (consoleHandle == INVALID_HANDLE_VALUE)
 	{
-		logger.logError("Failed to get console handle");
+		logger.error("Failed to get console handle");
 	}
 
 	// Create NetworkManager
@@ -67,22 +66,22 @@ GameClient::GameClient(const std::string& playerName, const std::string& passwor
 GameClient::~GameClient()
 {
 	disconnect();
-	logger.log("Client shutdown complete");
+	logger.debug("Client shutdown complete");
 }
 
 // Initialize the client
 bool GameClient::initialize()
 {
-	logger.log("Initializing client...");
+	logger.debug("Initializing client...");
 
 	// Initialize NetworkManager
 	if (!networkManager->initialize())
 	{
-		logger.logError("Failed to initialize network manager");
+		logger.error("Failed to initialize network manager");
 		return false;
 	}
 
-	logger.log("Client initialized successfully");
+	logger.debug("Client initialized successfully");
 	return true;
 }
 
@@ -161,7 +160,7 @@ void GameClient::processChatCommand(const std::string& command)
 		else if (cmd == "debug")
 		{
 			showDebug = !showDebug;
-			logger.setDebugMode(showDebug);
+			logger.setLogLevel(LogLevel::DEBUG);
 			addChatMessage("System", "Debug mode " + std::string(showDebug ? "enabled" : "disabled"));
 			return;
 		}
@@ -185,7 +184,7 @@ void GameClient::processChatCommand(const std::string& command)
 			std::string commandMsg = "COMMAND:" + command.substr(1); // Remove the leading '/'
 			// Use the NetworkManager to send packets
 			networkManager->sendPacket(commandMsg, true);
-			logger.log("Sent command to server: " + commandMsg);
+			logger.debug("Sent command to server: " + commandMsg);
 		}
 		else
 		{
@@ -309,7 +308,7 @@ void GameClient::handlePacket(const ENetPacket* packet)
 		}
 		catch (const std::exception& e)
 		{
-			logger.logError("Failed to parse TELEPORT message: " + std::string(e.what()));
+			logger.error("Failed to parse TELEPORT message: " + std::string(e.what()));
 		}
 	}
 	else if (message.substr(0, 15) == "COMMAND_RESULT:")
@@ -424,7 +423,7 @@ void GameClient::parseWorldState(const std::string& stateData)
 		}
 		catch (const std::exception& e)
 		{
-			logger.logError("Error parsing player data: " + std::string(e.what()) + ", Data: " + playerData);
+			logger.error("Error parsing player data: " + std::string(e.what()) + ", Data: " + playerData);
 		}
 	}
 
@@ -508,7 +507,7 @@ void GameClient::handleImGuiInput()
 	if (ImGui::IsKeyPressed(ImGuiKey_F1, false))
 	{
 		showDebug = !showDebug;
-		logger.setDebugMode(showDebug);
+		logger.setLogLevel(LogLevel::DEBUG);
 		addChatMessage("System", std::string("Debug mode ") + (showDebug ? "enabled" : "disabled"));
 	}
 
@@ -809,7 +808,7 @@ void GameClient::drawLoginScreen()
 
 	// Center version text properly
 	char versionText[64];
-	snprintf(versionText, sizeof(versionText), "Version %s", CLIENT_VERSION);
+	snprintf(versionText, sizeof(versionText), "Version %s", VERSION);
 	ImVec2 versionSize = ImGui::CalcTextSize(versionText);
 	ImGui::SetCursorPosX((contentWidth - versionSize.x) * 0.5f);
 	ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "%s", versionText);
@@ -952,7 +951,7 @@ void GameClient::drawUI()
 			ImGui::BeginChild("HeaderSection", ImVec2(ImGui::GetContentRegionAvail().x, 60), true, ImGuiWindowFlags_NoScrollbar);
 
 			// Left side - title and version
-			ImGui::Text("MMO Client v%s", CLIENT_VERSION);
+			ImGui::Text("MMO Client v%s", VERSION);
 
 			// Right side - connection status
 			float statusWidth = 150;

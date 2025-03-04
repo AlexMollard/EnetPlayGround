@@ -9,12 +9,12 @@
 AuthManager::AuthManager(Logger& logger, std::shared_ptr<NetworkManager> networkManager)
       : logger(logger), networkManager(networkManager)
 {
-	logger.log("Initializing AuthManager");
+	logger.debug("Initializing AuthManager");
 }
 
 AuthManager::~AuthManager()
 {
-	logger.log("AuthManager destroyed");
+	logger.debug("AuthManager destroyed");
 }
 
 bool AuthManager::authenticate(const std::string& username, const std::string& password, bool rememberCredentials, const std::function<void(uint32_t)>& authSuccessCallback, const std::function<void(const std::string&)>& authFailedCallback)
@@ -25,7 +25,7 @@ bool AuthManager::authenticate(const std::string& username, const std::string& p
 
 	if (!networkManager->isConnectedToServer())
 	{
-		logger.logError("Cannot authenticate: not connected to server");
+		logger.error("Cannot authenticate: not connected to server");
 		if (authFailedCallback)
 		{
 			// Execute callback on a separate thread to avoid blocking
@@ -37,7 +37,7 @@ bool AuthManager::authenticate(const std::string& username, const std::string& p
 	// Check for empty credentials
 	if (username.empty() || password.empty())
 	{
-		logger.logError("Authentication failed: empty credentials");
+		logger.error("Authentication failed: empty credentials");
 		if (authFailedCallback)
 		{
 			// Execute callback on a separate thread to avoid blocking
@@ -50,7 +50,7 @@ bool AuthManager::authenticate(const std::string& username, const std::string& p
 	this->username = username;
 	this->password = password;
 
-	logger.log("Authenticating as user: " + username);
+	logger.debug("Authenticating as user: " + username);
 
 	// Send authentication message - this should be non-blocking
 	std::string authMsg = "AUTH:" + username + "," + password;
@@ -90,7 +90,7 @@ bool AuthManager::processAuthResponse(const void* packetData, size_t packetLengt
 					playerId = std::stoi(message.substr(commaPos + 1));
 					authenticated = true;
 
-					logger.log("Authentication successful! Player ID: " + std::to_string(playerId), true);
+					logger.info("Authentication successful! Player ID: " + std::to_string(playerId));
 
 					if (successCallback)
 					{
@@ -100,7 +100,7 @@ bool AuthManager::processAuthResponse(const void* packetData, size_t packetLengt
 				}
 				catch (const std::exception& e)
 				{
-					logger.logError("Failed to parse player ID: " + std::string(e.what()));
+					logger.error("Failed to parse player ID: " + std::string(e.what()));
 					if (failedCallback)
 					{
 						// Execute callback on a separate thread to avoid blocking
@@ -112,7 +112,7 @@ bool AuthManager::processAuthResponse(const void* packetData, size_t packetLengt
 			{
 				authenticated = false;
 				std::string errorMessage = message.substr(commaPos + 1);
-				logger.logError("Authentication failed: " + errorMessage);
+				logger.error("Authentication failed: " + errorMessage);
 
 				if (failedCallback)
 				{
@@ -124,7 +124,7 @@ bool AuthManager::processAuthResponse(const void* packetData, size_t packetLengt
 		else
 		{
 			// Malformed auth response
-			logger.logError("Received malformed authentication response");
+			logger.error("Received malformed authentication response");
 			if (failedCallback)
 			{
 				// Execute callback on a separate thread to avoid blocking
@@ -142,7 +142,7 @@ bool AuthManager::processAuthResponse(const void* packetData, size_t packetLengt
 			playerId = std::stoi(message.substr(8));
 			authenticated = true;
 
-			logger.log("Received legacy welcome. Player ID: " + std::to_string(playerId), true);
+			logger.info("Received legacy welcome. Player ID: " + std::to_string(playerId));
 
 			if (successCallback)
 			{
@@ -152,7 +152,7 @@ bool AuthManager::processAuthResponse(const void* packetData, size_t packetLengt
 		}
 		catch (const std::exception& e)
 		{
-			logger.logError("Failed to parse legacy player ID: " + std::string(e.what()));
+			logger.error("Failed to parse legacy player ID: " + std::string(e.what()));
 			if (failedCallback)
 			{
 				// Execute callback on a separate thread to avoid blocking
@@ -168,12 +168,12 @@ bool AuthManager::processAuthResponse(const void* packetData, size_t packetLengt
 
 void AuthManager::saveCredentials(const std::string& username, const std::string& password)
 {
-	logger.log("Saving credentials...");
+	logger.debug("Saving credentials...");
 
 	std::ofstream file(CREDENTIALS_FILE, std::ios::binary);
 	if (!file.is_open())
 	{
-		logger.logError("Failed to save credentials: couldn't open file");
+		logger.error("Failed to save credentials: couldn't open file");
 		return;
 	}
 
@@ -189,11 +189,11 @@ void AuthManager::saveCredentials(const std::string& username, const std::string
 		file.write(reinterpret_cast<const char*>(&passwordLength), sizeof(passwordLength));
 		file.write(password.c_str(), passwordLength);
 
-		logger.log("Credentials saved successfully");
+		logger.debug("Credentials saved successfully");
 	}
 	catch (const std::exception& e)
 	{
-		logger.logError("Failed to save credentials: " + std::string(e.what()));
+		logger.error("Failed to save credentials: " + std::string(e.what()));
 	}
 
 	file.close();
@@ -201,12 +201,12 @@ void AuthManager::saveCredentials(const std::string& username, const std::string
 
 bool AuthManager::loadCredentials(std::string& username, std::string& password)
 {
-	logger.log("Loading saved credentials...");
+	logger.debug("Loading saved credentials...");
 
 	std::ifstream file(CREDENTIALS_FILE, std::ios::binary);
 	if (!file.is_open())
 	{
-		logger.log("No saved credentials found");
+		logger.debug("No saved credentials found");
 		return false;
 	}
 
@@ -228,13 +228,13 @@ bool AuthManager::loadCredentials(std::string& username, std::string& password)
 		file.read(passwordBuffer.data(), passwordLength);
 		password = std::string(passwordBuffer.data(), passwordLength);
 
-		logger.log("Loaded credentials for user: " + username);
+		logger.debug("Loaded credentials for user: " + username);
 		file.close();
 		return true;
 	}
 	catch (const std::exception& e)
 	{
-		logger.logError("Failed to load credentials: " + std::string(e.what()));
+		logger.error("Failed to load credentials: " + std::string(e.what()));
 		username.clear();
 		password.clear();
 		file.close();
