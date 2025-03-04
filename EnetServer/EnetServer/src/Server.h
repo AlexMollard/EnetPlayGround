@@ -3,26 +3,11 @@
 #pragma comment(lib, "ws2_32.lib")
 #pragma comment(lib, "winmm.lib")
 
-#include <algorithm>
 #include <atomic>
-#include <cctype>
-#include <chrono>
-#include <cmath>
-#include <ctime>
 #include <enet/enet.h>
-#include <filesystem>
-#include <fstream>
 #include <functional>
-#include <iomanip>
-#include <iostream>
-#include <map>
-#include <memory>
 #include <mutex>
-#include <optional>
-#include <queue>
-#include <random>
 #include <set>
-#include <sstream>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -32,7 +17,10 @@
 #include "Constants.h"
 #include "Logger.h"
 #include "SpatialGrid.h"
-#include "Utils.h"
+#include <corecrt.h>
+#include <cstdint>
+#include <deque>
+#include <vadefs.h>
 
 // Player authentication data
 struct AuthData
