@@ -156,4 +156,6 @@ std::string Utils::formatTimestamp(int64_t timestamp)
 	{
 		return std::to_string(diff / 2592000) + "mo ago";
 	}
+
+	return std::to_string(diff / 31536000) + "y ago";
 }

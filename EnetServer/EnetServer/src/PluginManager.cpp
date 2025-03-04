@@ -559,14 +559,14 @@ void PluginManager::dispatchServerTick()
 bool PluginManager::dispatchPlayerCommand(Player& player, const std::string& command, const std::vector<std::string>& args)
 {
 	auto pluginInstances = getPluginInstancesCopy();
-
+	bool commandHandled = false;
 	for (const auto& [name, plugin]: pluginInstances)
 	{
 		try
 		{
 			if (plugin->onPlayerCommand(player, command, args))
 			{
-				return true; // Command handled
+				commandHandled = true;
 			}
 		}
 		catch (const std::exception& e)
@@ -575,7 +575,7 @@ bool PluginManager::dispatchPlayerCommand(Player& player, const std::string& com
 		}
 	}
 
-	return false; // No plugin handled the command
+	return commandHandled;
 }
 
 void PluginManager::dispatchChatMessage(const std::string& sender, const std::string& message)

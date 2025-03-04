@@ -1354,9 +1354,10 @@ void GameServer::handleCommandMessage(Player& player, const std::string& command
 	std::string command = parts[0];
 	std::transform(command.begin(), command.end(), command.begin(), [](unsigned char c) { return std::tolower(c); });
 
+	bool commandHandled = false;
 	if (pluginManager->dispatchPlayerCommand(player, command, parts))
 	{
-		return; // Command handled by a plugin (I might remove this return if multiple plugins start using the same commands)
+		commandHandled = true;
 	}
 
 	// Check if command exists
@@ -1366,7 +1367,7 @@ void GameServer::handleCommandMessage(Player& player, const std::string& command
 		// Execute command
 		it->second(player, parts);
 	}
-	else
+	else if (!commandHandled)
 	{
 		sendSystemMessage(player, "Unknown command: " + command);
 	}

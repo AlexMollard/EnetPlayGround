@@ -154,6 +154,9 @@ void GameClient::processChatCommand(const std::string& command)
 		// Convert command to lowercase
 		std::transform(cmd.begin(), cmd.end(), cmd.begin(), [](unsigned char c) { return std::tolower(c); });
 
+		// Add the command to the chat
+		addChatMessage("You - command", command);
+
 		// Process local-only commands
 		if (cmd == "quit" || cmd == "exit")
 		{

@@ -235,7 +235,7 @@ void ThemeManager::createDefaultThemes()
 	gruvboxTheme.bgPrimary = ImVec4(0.16f, 0.16f, 0.16f, 1.00f);   // dark0 (#282828)
 	gruvboxTheme.bgSecondary = ImVec4(0.24f, 0.22f, 0.21f, 1.00f); // dark1 (#3c3836)
 	gruvboxTheme.bgTertiary = ImVec4(0.31f, 0.28f, 0.27f, 1.00f);  // dark2 (#504945)
-	gruvboxTheme.bgInput = ImVec4(0.24f, 0.22f, 0.21f, 1.00f);     // dark1 (#3c3836)
+	gruvboxTheme.bgInput = ImVec4(0.24f / 1.5f, 0.22f / 1.5f, 0.21f / 1.5f, 1.00f); // dark1 (#3c3836)
 
 	// Accent colors
 	gruvboxTheme.accentPrimary = ImVec4(0.72f, 0.73f, 0.15f, 1.00f);   // bright_green (#b8bb26)

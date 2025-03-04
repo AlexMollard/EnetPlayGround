@@ -49,7 +49,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;PLUGIN_EXPORTS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>$(SolutionDir)..\EnetShared;src</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)EnetPlugins;$(SolutionDir)..\EnetShared;src</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp20</LanguageStandard>
     </ClCompile>
     <Link>
@@ -65,7 +65,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>NDEBUG;_CONSOLE;PLUGIN_EXPORTS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>$(SolutionDir)..\EnetShared;src</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)EnetPlugins;$(SolutionDir)..\EnetShared;src</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp20</LanguageStandard>
     </ClCompile>
     <Link>
@@ -76,16 +76,16 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="..\..\EnetShared\Logger.cpp" />
-    <ClCompile Include="..\..\EnetShared\Utils.cpp" />
+    <ClCompile Include="..\..\..\EnetShared\Logger.cpp" />
+    <ClCompile Include="..\..\..\EnetShared\Utils.cpp" />
     <ClCompile Include="src\HelloCounter.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="..\..\EnetShared\Logger.h" />
-    <ClInclude Include="..\..\EnetShared\Utils.h" />
-    <ClInclude Include="..\..\EnetShared\PluginInterface.h" />
-    <ClInclude Include="..\..\EnetShared\Structs.h" />
-    <ClInclude Include="src\Constants.h" />
+    <ClInclude Include="..\..\..\EnetShared\Logger.h" />
+    <ClInclude Include="..\..\..\EnetShared\Utils.h" />
+    <ClInclude Include="..\..\..\EnetShared\PluginInterface.h" />
+    <ClInclude Include="..\..\..\EnetShared\Structs.h" />
+    <ClInclude Include="..\Constants.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
