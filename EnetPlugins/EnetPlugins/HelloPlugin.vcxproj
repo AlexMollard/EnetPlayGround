@@ -13,7 +13,7 @@
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>
     <Keyword>Win32Proj</Keyword>
-    <ProjectGuid>{cd2579af-7fc8-45b1-ad78-89c87cbba0cf}</ProjectGuid>
+    <ProjectGuid>{cd2579af-7fc8-45b1-ad78-89c87cbba2cf}</ProjectGuid>
     <RootNamespace>EnetPlugins</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
