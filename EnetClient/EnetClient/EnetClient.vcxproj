@@ -90,6 +90,7 @@
   <ItemGroup>
     <ClInclude Include="..\..\EnetShared\Logger.h" />
     <ClInclude Include="..\..\EnetShared\Utils.h" />
+    <ClInclude Include="..\..\EnetShared\Structs.h" />
     <ClInclude Include="src\AuthManager.h" />
     <ClInclude Include="src\NetworkManager.h" />
     <ClInclude Include="src/Constants.h" />

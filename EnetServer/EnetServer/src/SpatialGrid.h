@@ -3,31 +3,7 @@
 #include <set>
 #include <unordered_map>
 #include <mutex>
-
-struct Position
-{
-	float x = 0.0f;
-	float y = 0.0f;
-	float z = 0.0f;
-
-	bool operator==(const Position& other) const
-	{
-		return x == other.x && y == other.y && z == other.z;
-	}
-	
-	bool operator!=(const Position& other) const
-	{
-		return !(*this == other);
-	}
-
-	float distanceTo(const Position& other) const
-	{
-		float dx = x - other.x;
-		float dy = y - other.y;
-		float dz = z - other.z;
-		return std::sqrt(dx * dx + dy * dy + dz * dz);
-	}
-};
+#include "Structs.h"
 
 class SpatialGrid
 {

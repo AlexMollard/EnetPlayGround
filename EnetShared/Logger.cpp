@@ -184,7 +184,7 @@ void Logger::log(LogLevel level, const std::string& message, bool showOnConsole)
 	if (level < minLevel)
 		return;
 
-	std::lock_guard<std::mutex> lock(logMutex);
+	std::scoped_lock<std::mutex> lock(logMutex);
 	std::string timestamp = getTimestamp();
 	std::string levelStr = getLevelString(level);
 	unsigned int threadId = getCurrentThreadId();

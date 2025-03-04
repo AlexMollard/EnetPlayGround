@@ -212,7 +212,6 @@ void GameClient::handlePacket(const ENetPacket* packet)
 	        {
 		        this->myPlayerId = playerId;
 		        connectionState = ConnectionState::Connected;
-		        addChatMessage("System", "Authentication successful! Welcome to the server.");
 
 		        // Lets get the player position from the server
 		        std::string request = "POSITION:";
@@ -593,9 +592,6 @@ void GameClient::startConnection()
 	connectionState = ConnectionState::Connecting;
 	loginErrorMessage.clear();
 
-	// Add a system message to chat for better UX
-	addChatMessage("System", "Connecting to server at " + networkManager->getServerAddress() + ":" + std::to_string(networkManager->getServerPort()) + "...");
-
 	// Update state
 	connectionProgress = 0.1f;
 
@@ -630,7 +626,6 @@ void GameClient::startConnection()
 	        {
 		        this->myPlayerId = playerId;
 		        connectionState = ConnectionState::Connected;
-		        addChatMessage("System", "Authentication successful! Welcome to the server.");
 	        },
 	        [this](const std::string& errorMsg)
 	        {

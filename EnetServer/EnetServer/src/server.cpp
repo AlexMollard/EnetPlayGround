@@ -1,9 +1,10 @@
 #include "Server.h"
 
-#include "Utils.h"
-#include <iostream>
 #include <algorithm>
 #include <filesystem>
+#include <iostream>
+
+#include "Utils.h"
 
 // Constructor
 GameServer::GameServer()
@@ -19,6 +20,9 @@ GameServer::GameServer()
 
 	// Load saved player data
 	loadAuthData();
+
+	// Initialize plugin system
+	initializePluginSystem();
 }
 
 // Destructor
@@ -60,6 +64,187 @@ bool GameServer::initialize()
 
 	logger.info("Server initialized successfully on port " + std::to_string(config.port));
 	return true;
+}
+
+void GameServer::initializePluginSystem()
+{
+	// Initialize plugin manager
+	pluginManager = std::make_unique<PluginManager>(this);
+
+	// Add plugin command handlers
+	initializePluginCommandHandlers();
+
+	// Load plugins from plugins directory
+	if (!std::filesystem::exists("./plugins"))
+	{
+		std::filesystem::create_directories("./plugins");
+	}
+
+	loadPluginsFromDirectory("./plugins");
+
+	logger.info("Plugin system initialized");
+}
+
+void GameServer::initializePluginCommandHandlers()
+{
+	// Plugin commands
+	commandHandlers["plugins"] = [this](Player& player, const std::vector<std::string>& args)
+	{
+		if (!player.isAdmin)
+		{
+			sendSystemMessage(player, "You don't have permission to use this command");
+			return;
+		}
+
+		auto plugins = getLoadedPlugins();
+		if (plugins.empty())
+		{
+			sendSystemMessage(player, "No plugins loaded");
+			return;
+		}
+
+		sendSystemMessage(player, "Loaded plugins (" + std::to_string(plugins.size()) + "):");
+		for (const auto& name: plugins)
+		{
+			IPlugin* plugin = pluginManager->getPlugin(name);
+			if (plugin)
+			{
+				sendSystemMessage(player, "- " + name + " v" + plugin->getVersion() + " by " + plugin->getAuthor());
+			}
+			else
+			{
+				sendSystemMessage(player, "- " + name);
+			}
+		}
+	};
+
+	commandHandlers["loadplugin"] = [this](Player& player, const std::vector<std::string>& args)
+	{
+		if (!player.isAdmin)
+		{
+			sendSystemMessage(player, "You don't have permission to use this command");
+			return;
+		}
+
+		if (args.size() < 2)
+		{
+			sendSystemMessage(player, "Usage: /loadplugin <path>");
+			return;
+		}
+
+		std::string path = args[1];
+		if (loadPlugin(path))
+		{
+			sendSystemMessage(player, "Plugin loaded successfully");
+		}
+		else
+		{
+			sendSystemMessage(player, "Failed to load plugin");
+		}
+	};
+
+	commandHandlers["unloadplugin"] = [this](Player& player, const std::vector<std::string>& args)
+	{
+		if (!player.isAdmin)
+		{
+			sendSystemMessage(player, "You don't have permission to use this command");
+			return;
+		}
+
+		if (args.size() < 2)
+		{
+			sendSystemMessage(player, "Usage: /unloadplugin <name>");
+			return;
+		}
+
+		std::string name = args[1];
+		if (unloadPlugin(name))
+		{
+			sendSystemMessage(player, "Plugin unloaded successfully");
+		}
+		else
+		{
+			sendSystemMessage(player, "Failed to unload plugin");
+		}
+	};
+
+	commandHandlers["reloadplugin"] = [this](Player& player, const std::vector<std::string>& args)
+	{
+		if (!player.isAdmin)
+		{
+			sendSystemMessage(player, "You don't have permission to use this command");
+			return;
+		}
+
+		if (args.size() < 2)
+		{
+			sendSystemMessage(player, "Usage: /reloadplugin <name>");
+			return;
+		}
+
+		std::string name = args[1];
+		if (reloadPlugin(name))
+		{
+			sendSystemMessage(player, "Plugin reloaded successfully");
+		}
+		else
+		{
+			sendSystemMessage(player, "Failed to reload plugin");
+		}
+	};
+
+	commandHandlers["reloadallplugins"] = [this](Player& player, const std::vector<std::string>& args)
+	{
+		if (!player.isAdmin)
+		{
+			sendSystemMessage(player, "You don't have permission to use this command");
+			return;
+		}
+
+		auto plugins = getLoadedPlugins();
+		if (plugins.empty())
+		{
+			sendSystemMessage(player, "No plugins loaded");
+			return;
+		}
+
+		int successCount = 0;
+		for (const auto& name: plugins)
+		{
+			if (reloadPlugin(name))
+			{
+				successCount++;
+			}
+		}
+
+		sendSystemMessage(player, "Reloaded " + std::to_string(successCount) + " of " + std::to_string(plugins.size()) + " plugins");
+	};
+}
+
+// Plugin system methods
+bool GameServer::loadPlugin(const std::string& path)
+{
+	return pluginManager->loadPlugin(path);
+}
+
+bool GameServer::unloadPlugin(const std::string& name)
+{
+	return pluginManager->unloadPlugin(name);
+}
+
+bool GameServer::reloadPlugin(const std::string& name)
+{
+	return pluginManager->reloadPlugin(name);
+}
+
+bool GameServer::loadPluginsFromDirectory(const std::string& directory)
+{
+	return pluginManager->loadPluginsFromDirectory(directory);
+}
+
+std::vector<std::string> GameServer::getLoadedPlugins() const
+{
+	return pluginManager->getLoadedPlugins();
 }
 
 // Start server
@@ -107,6 +292,16 @@ void GameServer::shutdown()
 
 	// Signal threads to stop
 	isRunning = false;
+
+	// Unload plugins explicitly before shutting down threads
+	if (pluginManager)
+	{
+		auto plugins = getLoadedPlugins();
+		for (const auto& name: plugins)
+		{
+			unloadPlugin(name);
+		}
+	}
 
 	// Wait for threads to finish
 	if (networkThread.joinable())
@@ -201,9 +396,16 @@ void GameServer::run()
 				int level = std::stoi(command.substr(9));
 				logger.setLogLevel((LogLevel) level);
 			}
-			catch (const std::exception& e)
+			catch (const std::exception&)
 			{
 				logger.error("Invalid log level: " + command.substr(9));
+			}
+		}
+		else if (command.substr(0, 7) == "plugins")
+		{
+			for (auto& plugin : pluginManager->getLoadedPlugins())
+			{
+				logger.info(plugin);
 			}
 		}
 		else
@@ -269,7 +471,21 @@ void GameServer::updateThreadFunc()
 
 	while (isRunning)
 	{
+		// Get current time
+		uint32_t currentTime = Utils::getCurrentTimeMs();
+
+		// Check for plugin updates periodically
+		if (currentTime - lastPluginCheckTime > pluginCheckIntervalMs)
+		{
+			pluginManager->checkForPluginUpdates();
+			lastPluginCheckTime = currentTime;
+		}
+
+		// Synchronize player stats
 		syncPlayerStats();
+
+		// Dispatch server tick to plugins
+		pluginManager->dispatchServerTick();
 
 		// Broadcast world state
 		broadcastWorldState();
@@ -314,7 +530,7 @@ void GameServer::handleClientConnect(const ENetEvent& event)
 	uint32_t tempId = 0; // Use 0 for unauthenticated players
 	std::string defaultName = "Guest" + std::to_string(Utils::getCurrentTimeMs() % 10000);
 
-	std::lock_guard<std::mutex> lock(playersMutex);
+	std::scoped_lock<std::mutex> lock(playersMutex);
 
 	Player newPlayer;
 	newPlayer.id = tempId;
@@ -340,13 +556,12 @@ void GameServer::handleClientConnect(const ENetEvent& event)
 	// Add to players map (using peer pointer as key for unauthenticated players)
 	players[reinterpret_cast<uintptr_t>(event.peer)] = newPlayer;
 
+	// Send plugin event
+	pluginManager->dispatchPlayerConnect(newPlayer);
+
 	// Send welcome message
 	std::string welcomeMsg = "WELCOME:" + std::to_string(tempId);
 	sendPacket(event.peer, welcomeMsg, true);
-
-	// Send system message
-	std::string systemMsg = "SYSTEM:Welcome to the server! Please authenticate with /login username password";
-	sendPacket(event.peer, systemMsg, true);
 
 	logger.info("Temporary player created: " + defaultName);
 
@@ -377,7 +592,7 @@ void GameServer::handleClientMessage(const ENetEvent& event)
 	// Find player
 	Player* player = nullptr;
 	{
-		std::lock_guard<std::mutex> lock(playersMutex);
+		std::scoped_lock<std::mutex> lock(playersMutex);
 
 		if (playerId == 0)
 		{
@@ -416,6 +631,9 @@ void GameServer::handleClientMessage(const ENetEvent& event)
 	//if (message.substr(0, 9) != "POSITION:" && message.substr(0, 5) != "PING:") {
 	//    logger.debug("Message from " + player->name + ": " + message);
 	//}
+
+	// Send of plugin event, This will hopefully fully replace all the code below in the future
+	pluginManager->dispatchPlayerMessage(*player, message);
 
 	// Handle different message types
 	if (message.substr(0, 5) == "AUTH:")
@@ -489,7 +707,7 @@ void GameServer::handleClientDisconnect(const ENetEvent& event)
 	// Get player ID from peer data with proper locking
 	uint32_t playerId = 0;
 	{
-		std::lock_guard<std::mutex> peerDataLock(peerDataMutex);
+		std::scoped_lock<std::mutex> peerDataLock(peerDataMutex);
 		uint32_t* ptrPlayerId = reinterpret_cast<uint32_t*>(event.peer->data);
 		if (ptrPlayerId != nullptr)
 		{
@@ -499,14 +717,14 @@ void GameServer::handleClientDisconnect(const ENetEvent& event)
 
 	// Clean up stats
 	{
-		std::lock_guard<std::mutex> statsLock(peerStatsMutex);
+		std::scoped_lock<std::mutex> statsLock(peerStatsMutex);
 		peerStats.erase(reinterpret_cast<uintptr_t>(event.peer));
 	}
 
 	// Handle cleanup based on authentication status
 	std::string playerName;
 	{
-		std::lock_guard<std::mutex> lock(playersMutex);
+		std::scoped_lock<std::mutex> lock(playersMutex);
 
 		if (playerId == 0)
 		{
@@ -514,6 +732,7 @@ void GameServer::handleClientDisconnect(const ENetEvent& event)
 			auto it = players.find(reinterpret_cast<uintptr_t>(event.peer));
 			if (it != players.end())
 			{
+				pluginManager->dispatchPlayerDisconnect(it->second);
 				playerName = it->second.name;
 				players.erase(it);
 			}
@@ -524,6 +743,7 @@ void GameServer::handleClientDisconnect(const ENetEvent& event)
 			auto it = players.find(playerId);
 			if (it != players.end())
 			{
+				pluginManager->dispatchPlayerDisconnect(it->second);
 				playerName = it->second.name;
 				Position lastPos = it->second.position;
 
@@ -541,7 +761,7 @@ void GameServer::handleClientDisconnect(const ENetEvent& event)
 
 	// Clean up peer data ONCE, at the end
 	{
-		std::lock_guard<std::mutex> peerDataLock(peerDataMutex);
+		std::scoped_lock<std::mutex> peerDataLock(peerDataMutex);
 		uint32_t* ptrPlayerId = reinterpret_cast<uint32_t*>(event.peer->data);
 		delete ptrPlayerId;
 		event.peer->data = nullptr;
@@ -572,7 +792,7 @@ void GameServer::handleAuthMessage(const std::string& authDataStr, ENetPeer* pee
 	uintptr_t peerKey = reinterpret_cast<uintptr_t>(peer);
 
 	{
-		std::lock_guard<std::mutex> lock(playersMutex);
+		std::scoped_lock<std::mutex> lock(playersMutex);
 		auto it = players.find(peerKey);
 		if (it == players.end())
 		{
@@ -621,7 +841,7 @@ void GameServer::handleAuthMessage(const std::string& authDataStr, ENetPeer* pee
 
 	// Authenticate player
 	{
-		std::lock_guard<std::mutex> lock(authMutex);
+		std::scoped_lock<std::mutex> lock(authMutex);
 
 		auto it = authenticatedPlayers.find(username);
 		if (it != authenticatedPlayers.end())
@@ -650,7 +870,7 @@ void GameServer::handleAuthMessage(const std::string& authDataStr, ENetPeer* pee
 				response = "Invalid password";
 
 				// Update the failed attempts in the stored player
-				std::lock_guard<std::mutex> playerLock(playersMutex);
+				std::scoped_lock<std::mutex> playerLock(playersMutex);
 				auto playerIt = players.find(peerKey);
 				if (playerIt != players.end())
 				{
@@ -668,7 +888,7 @@ void GameServer::handleAuthMessage(const std::string& authDataStr, ENetPeer* pee
 			response = "User not found. Use /register to create an account.";
 
 			// Update the failed attempts in the stored player
-			std::lock_guard<std::mutex> playerLock(playersMutex);
+			std::scoped_lock<std::mutex> playerLock(playersMutex);
 			auto playerIt = players.find(peerKey);
 			if (playerIt != players.end())
 			{
@@ -689,7 +909,7 @@ void GameServer::handleAuthMessage(const std::string& authDataStr, ENetPeer* pee
 	// Check if player ID is already in use (multiple connections)
 	bool alreadyLoggedIn = false;
 	{
-		std::lock_guard<std::mutex> lock(playersMutex);
+		std::scoped_lock<std::mutex> lock(playersMutex);
 		alreadyLoggedIn = players.find(playerId) != players.end();
 	}
 
@@ -702,8 +922,8 @@ void GameServer::handleAuthMessage(const std::string& authDataStr, ENetPeer* pee
 
 	// Update the player object with authenticated info
 	{
-		std::lock_guard<std::mutex> pLock(playersMutex);
-		std::lock_guard<std::mutex> peerLock(peerDataMutex);
+		std::scoped_lock<std::mutex> pLock(playersMutex);
+		std::scoped_lock<std::mutex> peerLock(peerDataMutex);
 
 		// Create a new player entry
 		Player authenticatedPlayer;
@@ -754,6 +974,9 @@ void GameServer::handleAuthMessage(const std::string& authDataStr, ENetPeer* pee
 
 	// Broadcast join message
 	broadcastSystemMessage(username + " has joined the game");
+
+	// Plugin loggedin event
+	pluginManager->dispatchPlayerLogin(players[playerId]);
 }
 
 // Handle player registration
@@ -785,7 +1008,7 @@ void GameServer::handleRegistration(Player& player, const std::string& username,
 
 	// Register new player
 	{
-		std::lock_guard<std::mutex> lock(authMutex);
+		std::scoped_lock<std::mutex> lock(authMutex);
 
 		// Check if username already exists
 		if (authenticatedPlayers.find(username) != authenticatedPlayers.end())
@@ -825,7 +1048,7 @@ void GameServer::handleRegistration(Player& player, const std::string& username,
 
 		// Update the player object with registered info
 		{
-			std::lock_guard<std::mutex> pLock(playersMutex);
+			std::scoped_lock<std::mutex> pLock(playersMutex);
 
 			// Create a new player entry
 			Player registeredPlayer;
@@ -884,8 +1107,8 @@ void GameServer::handleRegistration(Player& player, const std::string& username,
 
 void GameServer::syncPlayerStats()
 {
-	std::lock_guard<std::mutex> statsLock(peerStatsMutex);
-	std::lock_guard<std::mutex> playersLock(playersMutex);
+	std::scoped_lock<std::mutex> statsLock(peerStatsMutex);
+	std::scoped_lock<std::mutex> playersLock(playersMutex);
 
 	// For each player, copy stats from the lightweight objects
 	for (auto& playerPair: players)
@@ -1004,6 +1227,7 @@ void GameServer::handleDeltaPositionUpdate(Player& player, const std::string& de
 		Position oldPosition = player.position;
 		player.position = newPosition;
 		player.lastPositionUpdateTime = currentTime;
+		pluginManager->dispatchPlayerMove(player, oldPosition, player.position);
 
 		// Update in spatial grid
 		spatialGrid.updateEntity(player.id, oldPosition, newPosition);
@@ -1073,7 +1297,7 @@ void GameServer::handleChatMessage(Player& player, const std::string& message)
 
 	// Store in chat history
 	{
-		std::lock_guard<std::mutex> lock(chatMutex);
+		std::scoped_lock<std::mutex> lock(chatMutex);
 
 		ChatMessage chatMsg;
 		chatMsg.sender = player.name;
@@ -1130,6 +1354,11 @@ void GameServer::handleCommandMessage(Player& player, const std::string& command
 	std::string command = parts[0];
 	std::transform(command.begin(), command.end(), command.begin(), [](unsigned char c) { return std::tolower(c); });
 
+	if (pluginManager->dispatchPlayerCommand(player, command, parts))
+	{
+		return; // Command handled by a plugin (I might remove this return if multiple plugins start using the same commands)
+	}
+
 	// Check if command exists
 	auto it = commandHandlers.find(command);
 	if (it != commandHandlers.end())
@@ -1172,7 +1401,7 @@ void GameServer::sendPacket(ENetPeer* peer, const std::string& message, bool rel
 
 	// Update per-peer stats without accessing player objects
 	{
-		std::lock_guard<std::mutex> lock(peerStatsMutex); // Much lighter lock
+		std::scoped_lock<std::mutex> lock(peerStatsMutex); // Much lighter lock
 		peerStats[reinterpret_cast<uintptr_t>(peer)].totalBytesSent += message.length();
 	}
 
@@ -1182,7 +1411,7 @@ void GameServer::sendPacket(ENetPeer* peer, const std::string& message, bool rel
 // Send system message to player
 void GameServer::sendSystemMessage(Player& player, const std::string& message)
 {
-	std::cout << "Sending system message to " << player.name << ": " << message << std::endl;
+	logger.trace("Sending system message to" + player.name + ": " + message);
 	std::string sysMsg = "SYSTEM:" + message;
 	sendPacket(player.peer, sysMsg, true);
 }
@@ -1190,7 +1419,7 @@ void GameServer::sendSystemMessage(Player& player, const std::string& message)
 // Send system message to player by ID
 void GameServer::sendSystemMessage(uint32_t playerId, const std::string& message)
 {
-	std::lock_guard<std::mutex> lock(playersMutex);
+	std::scoped_lock<std::mutex> lock(playersMutex);
 
 	auto it = players.find(playerId);
 	if (it != players.end())
@@ -1209,7 +1438,7 @@ void GameServer::sendTeleport(Player& player, const Position& position)
 // Broadcast world state to all players
 void GameServer::broadcastWorldState()
 {
-	std::lock_guard<std::mutex> lock(playersMutex);
+	std::scoped_lock<std::mutex> lock(playersMutex);
 
 	for (auto& pair: players)
 	{
@@ -1267,7 +1496,7 @@ void GameServer::broadcastWorldState()
 // Check for timed out players
 void GameServer::checkTimeouts()
 {
-	std::lock_guard<std::mutex> lock(playersMutex);
+	std::scoped_lock<std::mutex> lock(playersMutex);
 	uint32_t currentTime = Utils::getCurrentTimeMs();
 
 	std::vector<uint32_t> timeoutPlayers;
@@ -1313,7 +1542,7 @@ void GameServer::checkTimeouts()
 // Broadcast system message to all players
 void GameServer::broadcastSystemMessage(const std::string& message)
 {
-	std::lock_guard<std::mutex> lock(playersMutex);
+	//std::scoped_lock<std::mutex> lock(playersMutex);
 
 	logger.info("Broadcast: " + message);
 
@@ -1327,7 +1556,7 @@ void GameServer::broadcastSystemMessage(const std::string& message)
 
 	// Add to chat history
 	{
-		std::lock_guard<std::mutex> chatLock(chatMutex);
+		std::scoped_lock<std::mutex> chatLock(chatMutex);
 
 		ChatMessage chatMsg;
 		chatMsg.sender = "Server";
@@ -1347,12 +1576,30 @@ void GameServer::broadcastSystemMessage(const std::string& message)
 	}
 }
 
+std::vector<std::string> GameServer::getOnlinePlayerNames()
+{
+	std::scoped_lock<std::mutex> lock(playersMutex);
+
+	std::vector<std::string> names;
+	for (const auto& pair: players)
+	{
+		if (pair.second.isAuthenticated)
+		{
+			names.push_back(pair.second.name);
+		}
+	}
+
+	return names;
+}
+
 // Broadcast chat message to all players
 void GameServer::broadcastChatMessage(const std::string& sender, const std::string& message)
 {
-	std::lock_guard<std::mutex> lock(playersMutex);
+	std::scoped_lock<std::mutex> lock(playersMutex);
 
 	std::string chatMsg = "CHAT:" + sender + ":" + message;
+
+	pluginManager->dispatchChatMessage(sender, message);
 
 	for (auto& pair: players)
 	{
@@ -1367,7 +1614,7 @@ void GameServer::broadcastChatMessage(const std::string& sender, const std::stri
 void GameServer::savePlayerData(const std::string& username, const Position& lastPos)
 {
 	// Find in authenticated players
-	std::lock_guard<std::mutex> aLock(authMutex);
+	std::scoped_lock<std::mutex> aLock(authMutex);
 	auto authIt = authenticatedPlayers.find(username);
 	if (authIt != authenticatedPlayers.end())
 	{
@@ -1380,7 +1627,7 @@ void GameServer::savePlayerData(const std::string& username, const Position& las
 // Load authentication data from file
 void GameServer::loadAuthData()
 {
-	std::lock_guard<std::mutex> lock(authMutex);
+	std::scoped_lock<std::mutex> lock(authMutex);
 
 	logger.info("Loading player authentication data...");
 
@@ -1558,7 +1805,7 @@ void GameServer::loadAuthData()
 // Save authentication data to file
 void GameServer::saveAuthData()
 {
-	std::lock_guard<std::mutex> lock(authMutex);
+	std::scoped_lock<std::mutex> lock(authMutex);
 
 	logger.debug("Saving player authentication data...");
 
@@ -1859,7 +2106,7 @@ void GameServer::initializeCommandHandlers()
 	// Players list command
 	commandHandlers["players"] = [this](Player& player, const std::vector<std::string>& args)
 	{
-		std::lock_guard<std::mutex> lock(playersMutex);
+		std::scoped_lock<std::mutex> lock(playersMutex);
 
 		std::stringstream ss;
 		ss << "Online players (" << players.size() << "):";
@@ -1920,7 +2167,7 @@ void GameServer::initializeCommandHandlers()
 		// Find target player
 		Player* targetPlayer = nullptr;
 		{
-			std::lock_guard<std::mutex> lock(playersMutex);
+			std::scoped_lock<std::mutex> lock(playersMutex);
 			for (auto& pair: players)
 			{
 				if (pair.second.isAuthenticated && pair.second.name == targetName)
@@ -2062,7 +2309,7 @@ void GameServer::initializeCommandHandlers()
 		// Find target player
 		Player* targetPlayer = nullptr;
 		{
-			std::lock_guard<std::mutex> lock(playersMutex);
+			std::scoped_lock<std::mutex> lock(playersMutex);
 			for (auto& pair: players)
 			{
 				if (pair.second.isAuthenticated && pair.second.name == targetName)
@@ -2099,7 +2346,7 @@ void GameServer::initializeCommandHandlers()
 // Kick a player by name
 bool GameServer::kickPlayer(const std::string& playerName, const std::string& adminName)
 {
-	std::lock_guard<std::mutex> lock(playersMutex);
+	std::scoped_lock<std::mutex> lock(playersMutex);
 
 	for (auto& pair: players)
 	{
@@ -2137,7 +2384,7 @@ bool GameServer::setPlayerAdmin(const std::string& playerName, bool isAdmin)
 {
 	// Update in auth data
 	{
-		std::lock_guard<std::mutex> lock(authMutex);
+		std::scoped_lock<std::mutex> lock(authMutex);
 
 		auto it = authenticatedPlayers.find(playerName);
 		if (it != authenticatedPlayers.end())
@@ -2158,7 +2405,7 @@ bool GameServer::setPlayerAdmin(const std::string& playerName, bool isAdmin)
 
 	// Update in active players if online
 	{
-		std::lock_guard<std::mutex> lock(playersMutex);
+		std::scoped_lock<std::mutex> lock(playersMutex);
 
 		for (auto& pair: players)
 		{
@@ -2182,7 +2429,7 @@ void GameServer::printServerStatus()
 {
 	uint32_t authenticatedCount = 0;
 	{
-		std::lock_guard<std::mutex> lock(playersMutex);
+		std::scoped_lock<std::mutex> lock(playersMutex);
 		for (const auto& pair: players)
 		{
 			if (pair.second.isAuthenticated)
@@ -2209,7 +2456,7 @@ void GameServer::printServerStatus()
 // Print player list to console
 void GameServer::printPlayerList()
 {
-	std::lock_guard<std::mutex> lock(playersMutex);
+	std::scoped_lock<std::mutex> lock(playersMutex);
 
 	std::cout << "\n===== Online Players =====\n";
 
@@ -2243,6 +2490,11 @@ void GameServer::printConsoleHelp()
 	std::cout << "set_admin <username> - Grant admin status\n";
 	std::cout << "remove_admin <username> - Remove admin status\n";
 	std::cout << "reload - Reload configuration\n";
+	std::cout << "plugins - List loaded plugins\n";
+	std::cout << "loadplugin <path> - Load a plugin\n";
+	std::cout << "unloadplugin <name> - Unload a plugin\n";
+	std::cout << "reloadplugin <name> - Reload a plugin\n";
+	std::cout << "reloadallplugins - Reload all plugins\n";
 	std::cout << "loglevel <0-6> - Set log level (0=trace, 1=debug, 2=info, 3=warn, 4=error, 5=fatal, 6=off)\n";
 	std::cout << "quit/exit - Shutdown server\n";
 	std::cout << "===========================\n";

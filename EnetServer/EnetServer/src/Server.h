@@ -12,65 +12,18 @@
 #include <thread>
 #include <unordered_map>
 #include <vector>
-
-// Configuration
-#include "Constants.h"
-#include "Logger.h"
-#include "SpatialGrid.h"
+#include <memory>
 #include <corecrt.h>
 #include <cstdint>
 #include <deque>
 #include <vadefs.h>
 
-// Player authentication data
-struct AuthData
-{
-	std::string username;
-	std::string passwordHash;
-	uint32_t playerId;
-	std::time_t lastLoginTime;
-	std::time_t registrationTime;
-	Position lastPosition;
-	std::string lastIpAddress;
-	uint32_t loginCount;
-	bool isAdmin;
-	std::string securityQuestion;
-	std::string securityAnswerHash;
-};
-
-// Player session data
-struct Player
-{
-	uint32_t id;
-	std::string name;
-	Position position;
-	Position lastValidPosition;
-	ENetPeer* peer;
-	uint32_t lastUpdateTime;
-	uint32_t lastPingTime;
-	uint32_t connectionStartTime;
-	uint32_t failedAuthAttempts;
-	uint32_t totalBytesReceived;
-	uint32_t totalBytesSent;
-	uint32_t pingMs;
-	bool isAuthenticated;
-	bool isAdmin;
-	std::string ipAddress;
-	std::set<uint32_t> visiblePlayers; // IDs of players currently visible to this player
-	uint32_t lastPositionUpdateTime;   // Time of the last position update received
-};
-
-// Chat message
-struct ChatMessage
-{
-	std::string sender;
-	std::string content;
-	uint32_t timestamp;
-	bool isGlobal;
-	bool isSystem;
-	float range;              // For local chat, how far the message travels
-	std::string targetPlayer; // For private messages
-};
+// Configuration
+#include "Structs.h"
+#include "Constants.h"
+#include "Logger.h"
+#include "SpatialGrid.h"
+#include "PluginManager.h"
 
 // Command handler function type
 using CommandHandler = std::function<void(Player&, const std::vector<std::string>&)>;
@@ -127,6 +80,20 @@ public:
 	void shutdown();
 	void run();
 
+	bool loadPlugin(const std::string& path);
+	bool unloadPlugin(const std::string& name);
+	bool reloadPlugin(const std::string& name);
+	bool loadPluginsFromDirectory(const std::string& directory);
+	
+	std::vector<std::string> getLoadedPlugins() const;
+
+	void sendSystemMessage(Player& player, const std::string& message);
+	void broadcastSystemMessage(const std::string& message);
+
+	std::vector<std::string> getOnlinePlayerNames();
+
+	Logger logger;
+
 private:
 	// Network
 	ENetHost* server = nullptr;
@@ -159,7 +126,6 @@ private:
 	SpatialGrid spatialGrid;
 
 	// Utilities
-	Logger logger;
 	std::thread networkThread;
 	std::thread updateThread;
 	std::thread saveThread;
@@ -174,6 +140,11 @@ private:
 	// Stats tracking
 	std::unordered_map<uintptr_t, PacketStats> peerStats;
 	std::mutex peerStatsMutex;
+
+	// Pliugins
+	std::unique_ptr<PluginManager> pluginManager;
+	uint32_t pluginCheckIntervalMs = 5000; // Check for plugin updates every 5 seconds
+	uint32_t lastPluginCheckTime = 0;
 
 	// Private methods
 	void networkThreadFunc();
@@ -192,12 +163,10 @@ private:
 	void handleCommandMessage(Player& player, const std::string& commandStr);
 	void sendAuthResponse(ENetPeer* peer, bool success, const std::string& message);
 	void sendPacket(ENetPeer* peer, const std::string& message, bool reliable);
-	void sendSystemMessage(Player& player, const std::string& message);
 	void sendSystemMessage(uint32_t playerId, const std::string& message);
 	void sendTeleport(Player& player, const Position& position);
 	void broadcastWorldState();
 	void checkTimeouts();
-	void broadcastSystemMessage(const std::string& message);
 	void broadcastChatMessage(const std::string& sender, const std::string& message);
 	void savePlayerData(const std::string& username, const Position& lastPos);
 	void loadAuthData();
@@ -211,4 +180,6 @@ private:
 	void printServerStatus();
 	void printPlayerList();
 	void printConsoleHelp();
+	void initializePluginCommandHandlers();
+	void initializePluginSystem();
 };
