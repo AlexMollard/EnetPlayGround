@@ -50,7 +50,7 @@ bool GameServer::initialize()
 
 	server = enet_host_create(&address,
 	        config.maxPlayers,
-	        2, // Number of channels
+	        4, // Number of channels
 	        0, // Unlimited incoming bandwidth
 	        0  // Unlimited outgoing bandwidth
 	);
