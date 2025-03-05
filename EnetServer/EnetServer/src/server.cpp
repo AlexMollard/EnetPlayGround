@@ -2107,24 +2107,25 @@ void GameServer::initializeCommandHandlers()
 	// Help command
 	commandHandlers["help"] = [this](Player& player, const std::vector<std::string>& args)
 	{
-		sendSystemMessage(player, "Available commands:");
-		sendSystemMessage(player, "/help - Show this help");
-		sendSystemMessage(player, "/pos - Show current position");
-		sendSystemMessage(player, "/tp x y z - Teleport to coordinates");
-		sendSystemMessage(player, "/players - List online players");
-		sendSystemMessage(player, "/me action - Send an action message");
-		sendSystemMessage(player, "/w username message - Send private message");
+		std::string helpMessage = "Available commands:\n"
+		                          "/help - Show this help\n"
+		                          "/pos - Show current position\n"
+		                          "/tp x y z - Teleport to coordinates\n"
+		                          "/players - List online players\n"
+		                          "/me action - Send an action message\n"
+		                          "/w username message - Send private message";
 
-		// Admin commands
 		if (player.isAdmin)
 		{
-			sendSystemMessage(player, "Admin commands:");
-			sendSystemMessage(player, "/kick username - Kick a player");
-			sendSystemMessage(player, "/ban username - Ban a player");
-			sendSystemMessage(player, "/broadcast message - Broadcast message to all");
-			sendSystemMessage(player, "/setadmin username - Grant admin status");
-			sendSystemMessage(player, "/tpplayer username - Teleport to player");
+			helpMessage += "\n\nAdmin commands:\n"
+			               "/kick username - Kick a player\n"
+			               "/ban username - Ban a player\n"
+			               "/broadcast message - Broadcast message to all\n"
+			               "/setadmin username - Grant admin status\n"
+			               "/tpplayer username - Teleport to player";
 		}
+
+		sendSystemMessage(player, helpMessage);
 	};
 
 	// Position command
@@ -2506,18 +2507,18 @@ void GameServer::printServerStatus()
 		}
 	}
 
-	std::cout << "\n===== Server Status =====\n";
-	std::cout << "Version: " << VERSION << "\n";
-	std::cout << "Uptime: " << Utils::formatUptime(stats.getUptimeSeconds()) << "\n";
-	std::cout << "Port: " << config.port << "\n";
-	std::cout << "Players: " << authenticatedCount << " online, " << authenticatedPlayers.size() << " registered\n";
-	std::cout << "Max concurrent players: " << stats.maxConcurrentPlayers << "\n";
-	std::cout << "Total connections: " << stats.totalConnections << "\n";
-	std::cout << "Failed auth attempts: " << stats.authFailures << "\n";
-	std::cout << "Network stats:\n";
-	std::cout << "  Packets: " << stats.totalPacketsSent << " sent, " << stats.totalPacketsReceived << " received\n";
-	std::cout << "  Data: " << Utils::formatBytes(stats.totalBytesSent) << " sent, " << Utils::formatBytes(stats.totalBytesReceived) << " received\n";
-	std::cout << "=========================\n";
+	logger.info("===== Server Status =====");
+	logger.info("Version: " + std::string(VERSION));
+	logger.info("Uptime: " + Utils::formatUptime(stats.getUptimeSeconds()));
+	logger.info("Port: " + std::to_string(config.port));
+	logger.info("Players: " + std::to_string(authenticatedCount) + " online, " + std::to_string(authenticatedPlayers.size()) + " registered");
+	logger.info("Max concurrent players: " + std::to_string(stats.maxConcurrentPlayers));
+	logger.info("Total connections: " + std::to_string(stats.totalConnections));
+	logger.info("Failed auth attempts: " + std::to_string(stats.authFailures));
+	logger.info("Network stats:");
+	logger.info("  Packets: " + std::to_string(stats.totalPacketsSent) + " sent, " + std::to_string(stats.totalPacketsReceived) + " received");
+	logger.info("  Data: " + Utils::formatBytes(stats.totalBytesSent) + " sent, " + Utils::formatBytes(stats.totalBytesReceived) + " received");
+	logger.info("=========================");
 }
 
 // Print player list to console
@@ -2525,46 +2526,49 @@ void GameServer::printPlayerList()
 {
 	std::scoped_lock<std::mutex> lock(playersMutex);
 
-	std::cout << "\n===== Online Players =====\n";
+	logger.info("===== Online Players =====");
 
-	for (const auto& pair: players)
+	if (players.empty() || std::none_of(players.begin(), players.end(), [](const auto& pair) { return pair.second.isAuthenticated; }))
 	{
-		if (pair.second.isAuthenticated)
+		logger.info("No players online.");
+	}
+	else
+	{
+		for (const auto& pair: players)
 		{
-			std::cout << "- " << pair.second.name << " (ID: " << pair.second.id << ")" << (pair.second.isAdmin ? " [ADMIN]" : "") << " @ X=" << pair.second.position.x << " Y=" << pair.second.position.y << " Z=" << pair.second.position.z << " | IP: " << pair.second.ipAddress << "\n";
+			if (pair.second.isAuthenticated)
+			{
+				std::string playerInfo = "- " + pair.second.name + " (ID: " + std::to_string(pair.second.id) + ")" + (pair.second.isAdmin ? " [ADMIN]" : "") + " @ X=" + std::to_string(pair.second.position.x) + " Y=" + std::to_string(pair.second.position.y) + " Z=" + std::to_string(pair.second.position.z) + " | IP: " + pair.second.ipAddress;
+				logger.info(playerInfo);
+			}
 		}
 	}
 
-	if (players.empty())
-	{
-		std::cout << "No players online.\n";
-	}
-
-	std::cout << "=========================\n";
+	logger.info("=========================");
 }
 
 // Print console help
 void GameServer::printConsoleHelp()
 {
-	std::cout << "\n===== Console Commands =====\n";
-	std::cout << "help - Show this help\n";
-	std::cout << "status - Show server status\n";
-	std::cout << "players - List online players\n";
-	std::cout << "broadcast <message> - Send message to all players\n";
-	std::cout << "kick <username> - Kick a player\n";
-	std::cout << "ban <username> - Ban a player\n";
-	std::cout << "save - Save player data manually\n";
-	std::cout << "set_admin <username> - Grant admin status\n";
-	std::cout << "remove_admin <username> - Remove admin status\n";
-	std::cout << "reload - Reload configuration\n";
-	std::cout << "plugins - List loaded plugins\n";
-	std::cout << "loadplugin <path> - Load a plugin\n";
-	std::cout << "unloadplugin <name> - Unload a plugin\n";
-	std::cout << "reloadplugin <name> - Reload a plugin\n";
-	std::cout << "reloadallplugins - Reload all plugins\n";
-	std::cout << "loglevel <0-6> - Set log level (0=trace, 1=debug, 2=info, 3=warn, 4=error, 5=fatal, 6=off)\n";
-	std::cout << "quit/exit - Shutdown server\n";
-	std::cout << "===========================\n";
+	logger.info("===== Console Commands =====");
+	logger.info("help - Show this help");
+	logger.info("status - Show server status");
+	logger.info("players - List online players");
+	logger.info("broadcast <message> - Send message to all players");
+	logger.info("kick <username> - Kick a player");
+	logger.info("ban <username> - Ban a player");
+	logger.info("save - Save player data manually");
+	logger.info("set_admin <username> - Grant admin status");
+	logger.info("remove_admin <username> - Remove admin status");
+	logger.info("reload - Reload configuration");
+	logger.info("plugins - List loaded plugins");
+	logger.info("loadplugin <path> - Load a plugin");
+	logger.info("unloadplugin <name> - Unload a plugin");
+	logger.info("reloadplugin <name> - Reload a plugin");
+	logger.info("reloadallplugins - Reload all plugins");
+	logger.info("loglevel <0-6> - Set log level (0=trace, 1=debug, 2=info, 3=warn, 4=error, 5=fatal, 6=off)");
+	logger.info("quit/exit - Shutdown server");
+	logger.info("===========================");
 }
 
 ServerStats::ServerStats()

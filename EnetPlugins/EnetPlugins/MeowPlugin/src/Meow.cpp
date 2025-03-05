@@ -251,6 +251,11 @@ public:
 				return true;
 			}
 		}
+		else if (command == "help")
+		{
+			serverFuncs.sendSystemMessage(player, "/cat - Interact with the server cat\n/cat pet - Pet the cat\n/cat feed [food] - Feed the cat\n/cat play - Play with the cat\n/cat status - Check the cat's status\n/cat meow - Make the cat meow\n/cat art - Display cat ASCII art");
+			return true;
+		}
 		else if (command == "pspsps")
 		{
 			// Summon the cat
