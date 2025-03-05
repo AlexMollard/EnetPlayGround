@@ -20,6 +20,9 @@
 
 // Initialize static members
 std::unique_ptr<Logger> Logger::instance = nullptr;
+std::string Logger::currentInputLine;
+std::mutex Logger::inputMutex;
+bool Logger::inputActive = false;
 
 Logger::Logger()
       : logFilePath(DEBUG_LOG_FILE)
@@ -75,6 +78,20 @@ Logger& Logger::getInstance()
 		instance = std::unique_ptr<Logger>(new Logger());
 	}
 	return *instance;
+}
+
+void Logger::setConsoleInputLine(const std::string& input)
+{
+	std::lock_guard<std::mutex> lock(inputMutex);
+	currentInputLine = input;
+	inputActive = true;
+}
+
+void Logger::clearConsoleInputLine()
+{
+	std::lock_guard<std::mutex> lock(inputMutex);
+	currentInputLine.clear();
+	inputActive = false;
 }
 
 void Logger::setLogLevel(LogLevel level)
@@ -213,94 +230,206 @@ void Logger::log(LogLevel level, const std::string& message, bool showOnConsole)
 	}
 
 	// Write to console if needed
-	// Write to console if needed
 	if (logToConsole && (showOnConsole || level >= LogLevel::WARNING))
 	{
-		if (useColors)
+		// Check if we need to protect console input
+		std::string inputLine;
+		bool hasInputLine = false;
+
 		{
+			std::lock_guard<std::mutex> inputLock(inputMutex);
+			if (inputActive)
+			{
+				inputLine = currentInputLine;
+				hasInputLine = true;
+			}
+		}
+
+		if (hasInputLine)
+		{
+			// Save and clear input line
+			std::cout << "\r" << std::string(inputLine.length() + 2, ' ') << "\r";
+
+			// Output log with colors if enabled
+			if (useColors)
+			{
 #ifdef _WIN32
-			HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
-			WORD originalAttributes;
-			CONSOLE_SCREEN_BUFFER_INFO consoleInfo;
-			GetConsoleScreenBufferInfo(hConsole, &consoleInfo);
-			originalAttributes = consoleInfo.wAttributes;
-			WORD textAttribute;
+				HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+				WORD originalAttributes;
+				CONSOLE_SCREEN_BUFFER_INFO consoleInfo;
+				GetConsoleScreenBufferInfo(hConsole, &consoleInfo);
+				originalAttributes = consoleInfo.wAttributes;
+				WORD textAttribute;
 
-			switch (level)
-			{
-				case LogLevel::TRACE:
-					textAttribute = FOREGROUND_BLUE | FOREGROUND_INTENSITY; // Bright Blue
-					break;
-				case LogLevel::DEBUG:
-					textAttribute = FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_INTENSITY; // Cyan
-					break;
-				case LogLevel::INFO:
-					textAttribute = FOREGROUND_GREEN | FOREGROUND_INTENSITY; // Bright Green
-					break;
-				case LogLevel::WARNING:
-					textAttribute = FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_INTENSITY; // Yellow
-					break;
-				case LogLevel::ERR:
-					textAttribute = FOREGROUND_RED | FOREGROUND_INTENSITY; // Bright Red
-					break;
-				case LogLevel::FATAL:
-					textAttribute = FOREGROUND_RED | FOREGROUND_INTENSITY | BACKGROUND_RED | BACKGROUND_GREEN | BACKGROUND_BLUE; // Bright Red on White
-					break;
-				default:
-					textAttribute = originalAttributes; // Default
-					break;
-			}
+				switch (level)
+				{
+					case LogLevel::TRACE:
+						textAttribute = FOREGROUND_BLUE | FOREGROUND_INTENSITY;
+						break;
+					case LogLevel::DEBUG:
+						textAttribute = FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_INTENSITY;
+						break;
+					case LogLevel::INFO:
+						textAttribute = FOREGROUND_GREEN | FOREGROUND_INTENSITY;
+						break;
+					case LogLevel::WARNING:
+						textAttribute = FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_INTENSITY;
+						break;
+					case LogLevel::ERR:
+						textAttribute = FOREGROUND_RED | FOREGROUND_INTENSITY;
+						break;
+					case LogLevel::FATAL:
+						textAttribute = FOREGROUND_RED | FOREGROUND_INTENSITY | BACKGROUND_RED | BACKGROUND_GREEN | BACKGROUND_BLUE;
+						break;
+					default:
+						textAttribute = originalAttributes;
+						break;
+				}
 
-			std::cout << "\r[" << timestamp << "] [";
-			SetConsoleTextAttribute(hConsole, textAttribute);
-			std::cout << levelStr;
-			SetConsoleTextAttribute(hConsole, originalAttributes);
-			std::cout << "] ";
-			if (threadId != mainThreadId)
-			{
-				std::cout << "[Thread:" << threadId << "] ";
-			}
-			std::cout << message << std::endl;
+				std::cout << "[" << timestamp << "] [";
+				SetConsoleTextAttribute(hConsole, textAttribute);
+				std::cout << levelStr;
+				SetConsoleTextAttribute(hConsole, originalAttributes);
+				std::cout << "] ";
+				if (threadId != mainThreadId)
+				{
+					std::cout << "[Thread:" << threadId << "] ";
+				}
+				std::cout << message << std::endl;
 #else
-			// ANSI color codes
-			std::string colorCode;
+				// ANSI color codes
+				std::string colorCode;
 
-			switch (level)
-			{
-				case LogLevel::TRACE:
-					colorCode = "\033[94m"; // Bright Blue
-					break;
-				case LogLevel::DEBUG:
-					colorCode = "\033[96m"; // Cyan
-					break;
-				case LogLevel::INFO:
-					colorCode = "\033[92m"; // Bright Green
-					break;
-				case LogLevel::WARNING:
-					colorCode = "\033[93m"; // Yellow
-					break;
-				case LogLevel::ERR:
-					colorCode = "\033[91m"; // Bright Red
-					break;
-				case LogLevel::FATAL:
-					colorCode = "\033[97;41m"; // White on Red Background
-					break;
-				default:
-					colorCode = "\033[0m"; // Reset/Normal
-					break;
-			}
+				switch (level)
+				{
+					case LogLevel::TRACE:
+						colorCode = "\033[94m";
+						break;
+					case LogLevel::DEBUG:
+						colorCode = "\033[96m";
+						break;
+					case LogLevel::INFO:
+						colorCode = "\033[92m";
+						break;
+					case LogLevel::WARNING:
+						colorCode = "\033[93m";
+						break;
+					case LogLevel::ERR:
+						colorCode = "\033[91m";
+						break;
+					case LogLevel::FATAL:
+						colorCode = "\033[97;41m";
+						break;
+					default:
+						colorCode = "\033[0m";
+						break;
+				}
 
-			std::cout << "\r[" << timestamp << "] [" << colorCode << levelStr << "\033[0m] ";
-			if (threadId != mainThreadId)
-			{
-				std::cout << "[Thread:" << threadId << "] ";
-			}
-			std::cout << message << std::endl;
+				std::cout << "[" << timestamp << "] [" << colorCode << levelStr << "\033[0m] ";
+				if (threadId != mainThreadId)
+				{
+					std::cout << "[Thread:" << threadId << "] ";
+				}
+				std::cout << message << std::endl;
 #endif
+			}
+			else
+			{
+				std::cout << logEntry << std::endl;
+			}
+
+			// Restore input line
+			std::cout << "> " << inputLine << std::flush;
 		}
 		else
 		{
-			std::cout << "\r" << logEntry << std::endl;
+			// Standard output without input protection
+			if (useColors)
+			{
+#ifdef _WIN32
+				HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+				WORD originalAttributes;
+				CONSOLE_SCREEN_BUFFER_INFO consoleInfo;
+				GetConsoleScreenBufferInfo(hConsole, &consoleInfo);
+				originalAttributes = consoleInfo.wAttributes;
+				WORD textAttribute;
+
+				switch (level)
+				{
+					case LogLevel::TRACE:
+						textAttribute = FOREGROUND_BLUE | FOREGROUND_INTENSITY; // Bright Blue
+						break;
+					case LogLevel::DEBUG:
+						textAttribute = FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_INTENSITY; // Cyan
+						break;
+					case LogLevel::INFO:
+						textAttribute = FOREGROUND_GREEN | FOREGROUND_INTENSITY; // Bright Green
+						break;
+					case LogLevel::WARNING:
+						textAttribute = FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_INTENSITY; // Yellow
+						break;
+					case LogLevel::ERR:
+						textAttribute = FOREGROUND_RED | FOREGROUND_INTENSITY; // Bright Red
+						break;
+					case LogLevel::FATAL:
+						textAttribute = FOREGROUND_RED | FOREGROUND_INTENSITY | BACKGROUND_RED | BACKGROUND_GREEN | BACKGROUND_BLUE; // Bright Red on White
+						break;
+					default:
+						textAttribute = originalAttributes; // Default
+						break;
+				}
+
+				std::cout << "\r[" << timestamp << "] [";
+				SetConsoleTextAttribute(hConsole, textAttribute);
+				std::cout << levelStr;
+				SetConsoleTextAttribute(hConsole, originalAttributes);
+				std::cout << "] ";
+				if (threadId != mainThreadId)
+				{
+					std::cout << "[Thread:" << threadId << "] ";
+				}
+				std::cout << message << std::endl;
+#else
+				// ANSI color codes
+				std::string colorCode;
+
+				switch (level)
+				{
+					case LogLevel::TRACE:
+						colorCode = "\033[94m"; // Bright Blue
+						break;
+					case LogLevel::DEBUG:
+						colorCode = "\033[96m"; // Cyan
+						break;
+					case LogLevel::INFO:
+						colorCode = "\033[92m"; // Bright Green
+						break;
+					case LogLevel::WARNING:
+						colorCode = "\033[93m"; // Yellow
+						break;
+					case LogLevel::ERR:
+						colorCode = "\033[91m"; // Bright Red
+						break;
+					case LogLevel::FATAL:
+						colorCode = "\033[97;41m"; // White on Red Background
+						break;
+					default:
+						colorCode = "\033[0m"; // Reset/Normal
+						break;
+				}
+
+				std::cout << "\r[" << timestamp << "] [" << colorCode << levelStr << "\033[0m] ";
+				if (threadId != mainThreadId)
+				{
+					std::cout << "[Thread:" << threadId << "] ";
+				}
+				std::cout << message << std::endl;
+#endif
+			}
+			else
+			{
+				std::cout << "\r" << logEntry << std::endl;
+			}
 		}
 	}
 }

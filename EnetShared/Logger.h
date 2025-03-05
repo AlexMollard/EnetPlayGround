@@ -45,12 +45,20 @@ private:
 	// Singleton pattern (optional)
 	static std::unique_ptr<Logger> instance;
 
+	static std::string currentInputLine;
+	static std::mutex inputMutex;
+	static bool inputActive;
+
 public:
 	Logger();
 	~Logger();
 
 	// Singleton accessor (optional)
 	static Logger& getInstance();
+
+	// Console input protection
+	static void setConsoleInputLine(const std::string& input);
+	static void clearConsoleInputLine();
 
 	// Configure logger
 	void setLogLevel(LogLevel level);

@@ -4,6 +4,10 @@
 #include <filesystem>
 #include <iostream>
 
+#ifdef _WIN32
+#	include <conio.h>
+#endif
+
 #include "Utils.h"
 
 // Constructor
@@ -330,13 +334,75 @@ void GameServer::run()
 {
 	start();
 
-	// Main thread can handle console commands
+	logger.info("Server started successfully. Type 'help' for available commands.");
+
+	// Main thread handles console commands
 	std::string command;
+
 	while (isRunning)
 	{
-		std::cout << "> ";
-		std::getline(std::cin, command);
+		// Show prompt
+		std::cout << "> " << std::flush;
 
+#ifdef _WIN32
+		// Windows-specific character-by-character input handling
+		std::string input;
+		Logger::setConsoleInputLine(input); // Initialize with empty string
+
+		bool inputComplete = false;
+		while (isRunning && !inputComplete)
+		{
+			if (_kbhit()) // Check if key was pressed
+			{
+				char c = _getch(); // Get the character
+
+				// Process Enter key
+				if (c == '\r')
+				{
+					std::cout << std::endl;
+					inputComplete = true;
+				}
+				// Process backspace
+				else if (c == '\b')
+				{
+					if (!input.empty())
+					{
+						input.pop_back();
+						std::cout << "\b \b" << std::flush; // Erase last character
+						Logger::setConsoleInputLine(input);
+					}
+				}
+				// Process Ctrl+C
+				else if (c == 3)
+				{
+					isRunning = false;
+					break;
+				}
+				// Process regular printable characters
+				else if (c >= 32 && c <= 126)
+				{
+					input.push_back(c);
+					std::cout << c << std::flush;
+					Logger::setConsoleInputLine(input);
+				}
+			}
+			else
+			{
+				// Sleep briefly to reduce CPU usage
+				std::this_thread::sleep_for(std::chrono::milliseconds(10));
+			}
+		}
+
+		command = input;
+#else
+		// Non-Windows platforms - simpler but not as robust
+		std::getline(std::cin, command);
+#endif
+
+		// Clear the console input protection
+		Logger::clearConsoleInputLine();
+
+		// Process command
 		if (command == "quit" || command == "exit")
 		{
 			break;
@@ -403,12 +469,12 @@ void GameServer::run()
 		}
 		else if (command.substr(0, 7) == "plugins")
 		{
-			for (auto& plugin : pluginManager->getLoadedPlugins())
+			for (auto& plugin: pluginManager->getLoadedPlugins())
 			{
 				logger.info(plugin);
 			}
 		}
-		else
+		else if (!command.empty())
 		{
 			logger.info("Unknown command: " + command);
 			logger.info("Type 'help' for available commands");
