@@ -22,3 +22,11 @@
 #define MAX_MOVEMENT_SPEED 2.0f      // Max allowed movement speed per update
 #define SECURE_PASSWORD_STORAGE true // Use secure hash for passwords
 #define ADMIN_PASSWORD "admin123"    // Default admin password (should be changed)
+
+// Database configuration
+#define USE_DATABASE true        // Enable database storage
+#define DB_HOST "localhost"      // Database host
+#define DB_USER "gameserver"     // Database username
+#define DB_PASSWORD "" // Will be loaded from secure source
+#define DB_NAME "gameserver"     // Database name
+#define DB_PORT 3306             // Database port

@@ -4,26 +4,27 @@
 #pragma comment(lib, "winmm.lib")
 
 #include <atomic>
+#include <corecrt.h>
+#include <cstdint>
+#include <deque>
 #include <enet/enet.h>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <set>
 #include <string>
 #include <thread>
 #include <unordered_map>
-#include <vector>
-#include <memory>
-#include <corecrt.h>
-#include <cstdint>
-#include <deque>
 #include <vadefs.h>
+#include <vector>
 
 // Configuration
-#include "Structs.h"
 #include "Constants.h"
 #include "Logger.h"
-#include "SpatialGrid.h"
 #include "PluginManager.h"
+#include "SpatialGrid.h"
+#include "Structs.h"
+#include "DatabaseManager.h"
 
 // Command handler function type
 using CommandHandler = std::function<void(Player&, const std::vector<std::string>&)>;
@@ -64,6 +65,14 @@ struct ServerConfig
 	int logLevel = 1; // 0=errors only, 1=normal, 2=debug
 	bool enableChat = true;
 	Position spawnPosition = { DEFAULT_SPAWN_X, DEFAULT_SPAWN_Y, DEFAULT_SPAWN_Z };
+
+	// Database configuration
+	std::string dbHost = DB_HOST;
+	std::string dbUser = DB_USER;
+	std::string dbPassword = DB_PASSWORD;
+	std::string dbName = DB_NAME;
+	int dbPort = DB_PORT;
+	bool useDatabase = USE_DATABASE;
 };
 
 // Main game server class
@@ -84,7 +93,7 @@ public:
 	bool unloadPlugin(const std::string& name);
 	bool reloadPlugin(const std::string& name);
 	bool loadPluginsFromDirectory(const std::string& directory);
-	
+
 	std::vector<std::string> getLoadedPlugins() const;
 
 	void sendSystemMessage(Player& player, const std::string& message);
@@ -124,6 +133,9 @@ private:
 
 	// Spatial partitioning
 	SpatialGrid spatialGrid;
+
+	// Database manager
+	DatabaseManager dbManager;
 
 	// Utilities
 	std::thread networkThread;
@@ -182,4 +194,5 @@ private:
 	void printConsoleHelp();
 	void initializePluginCommandHandlers();
 	void initializePluginSystem();
+	bool initializeDatabase();
 };

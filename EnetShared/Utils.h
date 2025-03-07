@@ -31,4 +31,7 @@ public:
 
 	// Converts a timestamp to a human readable string
 	static std::string formatTimestamp(int64_t timestamp);
+
+	// A C++ safe way of getting environment variables
+	static std::string getEnvVar(const std::string& key);
 };

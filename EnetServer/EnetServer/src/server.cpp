@@ -12,12 +12,19 @@
 
 // Constructor
 GameServer::GameServer()
+      : dbManager(logger)
 {
 	// Set up logger
 	logger.info("Initializing server...");
 
 	// Load configuration
 	loadConfig();
+
+	// Initialize database if enabled
+	if (config.useDatabase)
+	{
+		initializeDatabase();
+	}
 
 	// Initialize command handlers
 	initializeCommandHandlers();
@@ -33,6 +40,12 @@ GameServer::GameServer()
 GameServer::~GameServer()
 {
 	shutdown();
+
+	// Close database connection if used
+	if (config.useDatabase)
+	{
+		dbManager.disconnect();
+	}
 }
 
 // Initialize server
@@ -87,6 +100,37 @@ void GameServer::initializePluginSystem()
 	loadPluginsFromDirectory("./plugins");
 
 	logger.info("Plugin system initialized");
+}
+
+bool GameServer::initializeDatabase()
+{
+	// Check environment variables first
+	std::string envHost = Utils::getEnvVar("GAME_DB_HOST");
+	std::string envUser = Utils::getEnvVar("GAME_DB_USER");
+	std::string envPass = Utils::getEnvVar("GAME_DB_PASSWORD");
+	std::string envName = Utils::getEnvVar("GAME_DB_NAME");
+	std::string envPort = Utils::getEnvVar("GAME_DB_PORT");
+
+	// Override config with environment variables if present
+	std::string dbHost = !envHost.empty() ? envHost : config.dbHost;
+	std::string dbUser = !envUser.empty() ? envUser : config.dbUser;
+	std::string dbPassword = !envPass.empty() ? envPass : config.dbPassword;
+	std::string dbName = !envName.empty() ? envName : config.dbName;
+	int dbPort = !envPort.empty() ? std::stoi(envPort) : config.dbPort;
+
+	// Set connection details
+	dbManager.setConnectionInfo(dbHost, dbUser, dbPassword, dbName, dbPort);
+
+	// Connect to database
+	if (!dbManager.connect())
+	{
+		logger.error("Failed to connect to database. Falling back to file storage.");
+		config.useDatabase = false;
+		return false;
+	}
+
+	logger.info("Database connection established successfully");
+	return true;
 }
 
 void GameServer::initializePluginCommandHandlers()
@@ -1109,6 +1153,8 @@ void GameServer::handleRegistration(Player& player, const std::string& username,
 
 	if (success)
 	{
+		uint32_t oldKey = player.id == 0 ? reinterpret_cast<uintptr_t>(player.peer) : player.id;
+
 		// Save auth data immediately after registration
 		saveAuthData();
 
@@ -1133,10 +1179,6 @@ void GameServer::handleRegistration(Player& player, const std::string& username,
 			registeredPlayer.isAuthenticated = true;
 			registeredPlayer.isAdmin = false;
 			registeredPlayer.ipAddress = player.ipAddress;
-
-			// Remove old player entry
-			uint32_t oldKey = player.id == 0 ? reinterpret_cast<uintptr_t>(player.peer) : player.id;
-			players.erase(oldKey);
 
 			// Add new player entry
 			players[newPlayerId] = registeredPlayer;
@@ -1164,6 +1206,9 @@ void GameServer::handleRegistration(Player& player, const std::string& username,
 
 		// Broadcast join message
 		broadcastSystemMessage(username + " has joined the game for the first time!");
+
+		// Remove old player entry
+		players.erase(oldKey);
 	}
 	else
 	{
@@ -1680,14 +1725,40 @@ void GameServer::broadcastChatMessage(const std::string& sender, const std::stri
 // Updated function signature
 void GameServer::savePlayerData(const std::string& username, const Position& lastPos)
 {
-	// Find in authenticated players
-	std::scoped_lock<std::mutex> aLock(authMutex);
-	auto authIt = authenticatedPlayers.find(username);
-	if (authIt != authenticatedPlayers.end())
+	// First update in-memory structure
+	bool foundInMemory = false;
+	uint32_t playerId = 0;
+
 	{
-		// Save position
-		authIt->second.lastPosition = lastPos;
-		logger.debug("Saved position data for player " + username);
+		std::scoped_lock<std::mutex> aLock(authMutex);
+		auto authIt = authenticatedPlayers.find(username);
+		if (authIt != authenticatedPlayers.end())
+		{
+			// Save position in memory
+			authIt->second.lastPosition = lastPos;
+			playerId = authIt->second.playerId;
+			foundInMemory = true;
+			logger.debug("Updated in-memory position data for player " + username);
+		}
+	}
+
+	if (!foundInMemory)
+	{
+		logger.error("Failed to find player in memory: " + username);
+		return;
+	}
+
+	// Save to database if enabled
+	if (config.useDatabase && foundInMemory)
+	{
+		if (dbManager.savePlayerPosition(playerId, lastPos))
+		{
+			logger.debug("Saved position data for player " + username + " to database");
+		}
+		else
+		{
+			logger.error("Failed to save position data to database for player " + username);
+		}
 	}
 }
 
@@ -1698,6 +1769,22 @@ void GameServer::loadAuthData()
 
 	logger.info("Loading player authentication data...");
 
+	// Try to load from database if enabled
+	if (config.useDatabase)
+	{
+		if (dbManager.loadAuthData(authenticatedPlayers, nextPlayerId))
+		{
+			logger.info("Successfully loaded " + std::to_string(authenticatedPlayers.size()) + " player accounts from database");
+			return;
+		}
+		else
+		{
+			logger.error("Failed to load player data from database. Falling back to file.");
+			// Fall through to file-based loading if database fails
+		}
+	}
+
+	// Original file-based loading code (as fallback)
 	std::ifstream file(AUTH_DB_FILE, std::ios::binary);
 	if (!file.is_open())
 	{
@@ -1876,6 +1963,22 @@ void GameServer::saveAuthData()
 
 	logger.debug("Saving player authentication data...");
 
+	// Save to database if enabled
+	if (config.useDatabase)
+	{
+		if (dbManager.saveAuthData(authenticatedPlayers))
+		{
+			logger.debug("Saved authentication data for " + std::to_string(authenticatedPlayers.size()) + " players to database");
+			return;
+		}
+		else
+		{
+			logger.error("Failed to save player data to database. Falling back to file.");
+			// Fall through to file-based saving if database fails
+		}
+	}
+
+	// Original file-based saving code (as fallback)
 	// Create backup of existing file
 	if (std::filesystem::exists(AUTH_DB_FILE))
 	{
@@ -1942,11 +2045,11 @@ void GameServer::saveAuthData()
 		}
 
 		file.close();
-		logger.debug("Saved authentication data for " + std::to_string(numEntries) + " players");
+		logger.debug("Saved authentication data for " + std::to_string(numEntries) + " players to file");
 	}
 	catch (const std::exception& e)
 	{
-		logger.error("Error saving auth data: " + std::string(e.what()));
+		logger.error("Error saving auth data to file: " + std::string(e.what()));
 	}
 }
 
@@ -2049,6 +2152,32 @@ void GameServer::loadConfig()
 			{
 				config.spawnPosition.z = std::stof(value);
 			}
+
+			// database configuration options
+			else if (key == "use_database")
+			{
+				config.useDatabase = (value == "true" || value == "1");
+			}
+			else if (key == "db_host")
+			{
+				config.dbHost = value;
+			}
+			else if (key == "db_user")
+			{
+				config.dbUser = value;
+			}
+			else if (key == "db_password")
+			{
+				config.dbPassword = value;
+			}
+			else if (key == "db_name")
+			{
+				config.dbName = value;
+			}
+			else if (key == "db_port")
+			{
+				config.dbPort = std::stoi(value);
+			}
 		}
 		catch (const std::exception& e)
 		{
@@ -2095,6 +2224,15 @@ void GameServer::createDefaultConfig()
 	file << "spawn_position_x=" << DEFAULT_SPAWN_X << "\n";
 	file << "spawn_position_y=" << DEFAULT_SPAWN_Y << "\n";
 	file << "spawn_position_z=" << DEFAULT_SPAWN_Z << "\n";
+
+	// Database configuration
+	file << "\n# Database Configuration\n";
+	file << "use_database=" << (USE_DATABASE ? "true" : "false") << "\n";
+	file << "db_host=" << DB_HOST << "\n";
+	file << "db_user=" << DB_USER << "\n";
+	file << "db_password=" << DB_PASSWORD << "\n";
+	file << "db_name=" << DB_NAME << "\n";
+	file << "db_port=" << DB_PORT << "\n";
 
 	file.close();
 
@@ -2452,8 +2590,6 @@ bool GameServer::setPlayerAdmin(const std::string& playerName, bool isAdmin)
 {
 	// Update in auth data
 	{
-		std::scoped_lock<std::mutex> lock(authMutex);
-
 		auto it = authenticatedPlayers.find(playerName);
 		if (it != authenticatedPlayers.end())
 		{
@@ -2473,8 +2609,6 @@ bool GameServer::setPlayerAdmin(const std::string& playerName, bool isAdmin)
 
 	// Update in active players if online
 	{
-		std::scoped_lock<std::mutex> lock(playersMutex);
-
 		for (auto& pair: players)
 		{
 			if (pair.second.isAuthenticated && pair.second.name == playerName)

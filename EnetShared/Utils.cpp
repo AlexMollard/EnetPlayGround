@@ -4,6 +4,12 @@
 #include <random>
 #include <sstream>
 
+#ifdef _MSC_VER // Microsoft Visual C++ compiler
+#	include <stdlib.h>
+#else // Other compilers
+#	include <cstdlib>
+#endif
+
 #include "Constants.h"
 
 // Split string by delimiter
@@ -158,4 +164,27 @@ std::string Utils::formatTimestamp(int64_t timestamp)
 	}
 
 	return std::to_string(diff / 31536000) + "y ago";
+}
+
+std::string Utils::getEnvVar(const std::string& key)
+{
+#ifdef _MSC_VER // Microsoft Visual C++ compiler
+
+	// system("set"); // for testing only, I was having trouble trying to get some environment variables
+
+	char* buf = nullptr;
+	size_t size = 0;
+	std::string result;
+
+	// _dupenv_s allocates memory that must be freed
+	if (_dupenv_s(&buf, &size, key.c_str()) == 0 && buf != nullptr)
+	{
+		result = buf;
+		free(buf); // Free the allocated memory
+	}
+	return result;
+#else // Other compilers
+	char* val = std::getenv(key.c_str());
+	return val == nullptr ? std::string() : std::string(val);
+#endif
 }

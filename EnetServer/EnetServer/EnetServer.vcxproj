@@ -80,6 +80,7 @@
   <ItemGroup>
     <ClCompile Include="..\..\EnetShared\Logger.cpp" />
     <ClCompile Include="..\..\EnetShared\Utils.cpp" />
+    <ClCompile Include="src\DatabaseManager.cpp" />
     <ClCompile Include="src\PluginManager.cpp" />
     <ClCompile Include="src\SpatialGrid.cpp" />
     <ClCompile Include="src\main.cpp" />
@@ -90,6 +91,7 @@
     <ClInclude Include="..\..\EnetShared\Utils.h" />
     <ClInclude Include="..\..\EnetShared\PluginInterface.h" />
     <ClInclude Include="..\..\EnetShared\Structs.h" />
+    <ClInclude Include="src\DatabaseManager.h" />
     <ClInclude Include="src\PluginManager.h" />
     <ClInclude Include="src\SpatialGrid.h" />
     <ClInclude Include="src\Constants.h" />
