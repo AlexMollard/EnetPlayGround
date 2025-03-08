@@ -574,7 +574,7 @@ void GameClient::handleImGuiInput()
 	if (!chatFocused && !io.WantTextInput && connectionState == ConnectionState::Connected)
 	{
 		// Get elapsed time since last frame for smooth movement
-		uint32_t currentTime = time(0);
+		time_t currentTime = time(0);
 		float deltaTime = (currentTime - lastUpdateTime) / 1000.0f; // Convert to seconds
 		lastUpdateTime = currentTime;
 
@@ -735,14 +735,14 @@ void GameClient::updateNetwork()
 	}
 
 	// Get current time for delta calculations
-	uint32_t currentTime = time(0);
+	time_t currentTime = time(0);
 
 	// Use NetworkManager to process packets and handle events
 	networkManager->update(
 	        // Position update callback
 	        [this]()
 	        {
-		        uint32_t currentTime = time(0);
+		        time_t currentTime = time(0);
 		        if (currentTime - lastPositionUpdateTime >= positionUpdateRateMs && authManager->isAuthenticated())
 		        {
 			        networkManager->sendPositionUpdate(myPosition.x, myPosition.y, myPosition.z, lastSentPosition.x, lastSentPosition.y, lastSentPosition.z, useCompressedUpdates, movementThreshold);
@@ -788,7 +788,7 @@ void GameClient::handleChatCommandHistory()
 	{
 		if (commandHistoryIndex == -1)
 		{
-			commandHistoryIndex = commandHistory.size() - 1;
+			commandHistoryIndex = (int)commandHistory.size() - 1;
 		}
 		else if (commandHistoryIndex > 0)
 		{
@@ -1759,7 +1759,7 @@ void GameClient::drawChatPanel(float width, float height)
 		std::lock_guard<std::mutex> chatLock(chatMutex);
 		for (const auto& msg: chatMessages)
 		{
-			if (msg.content.empty())
+			if (msg.timestamp == 0)
 			{
 				continue;
 			}
@@ -1960,7 +1960,7 @@ void GameClient::drawNetworkOptionsUI(float width, float height)
 
 	{
 		// Position update rate
-		int updateRate = positionUpdateRateMs;
+		int updateRate = (int)positionUpdateRateMs;
 		if (ImGui::SliderInt(ICON_LC_WIFI " Update Rate (ms)", &updateRate, 50, 500))
 		{
 			positionUpdateRateMs = updateRate;

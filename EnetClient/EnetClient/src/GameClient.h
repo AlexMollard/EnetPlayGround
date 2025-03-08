@@ -1,7 +1,6 @@
 #pragma once
 
 // Standard library includes
-#define WIN32_LEAN_AND_MEAN
 #include <deque>
 #include <windows.h>
 #include <winsock2.h>
@@ -48,7 +47,7 @@ struct PlayerInfo
 	uint32_t id = 0;
 	std::string name;
 	Position position;
-	uint32_t lastSeen = 0;
+	time_t lastSeen = 0;
 	std::string status;
 };
 
@@ -59,7 +58,7 @@ struct ChatMessage
 {
 	std::string sender;
 	std::string content;
-	time_t timestamp;
+	time_t timestamp = 0;
 };
 
 /**
@@ -166,8 +165,8 @@ private:
 	std::unordered_map<uint32_t, PlayerInfo> otherPlayers;
 	std::mutex playersMutex;
 	float movementThreshold = 0.1f;
-	uint32_t positionUpdateRateMs = 50;
-	uint32_t lastPositionUpdateTime = 0;
+	time_t positionUpdateRateMs = 50;
+	time_t lastPositionUpdateTime = 0;
 	bool useCompressedUpdates = true;
 
 	// Status flags
@@ -210,8 +209,8 @@ private:
 	int commandHistoryIndex = -1;
 
 	// Connection monitoring
-	uint32_t lastUpdateTime = 0;
-	uint32_t lastConnectionCheckTime = 0;
+	time_t lastUpdateTime = 0;
+	time_t lastConnectionCheckTime = 0;
 
 	// Utility objects
 	HANDLE consoleHandle;

@@ -101,7 +101,7 @@ bool PluginManager::loadPlugin(const std::string& path)
 		// Set up function pointers using std::function (ensure ServerFunctions struct is updated)
 		functions.broadcastSystemMessage = [this](const std::string& msg) { server->broadcastSystemMessage(msg); };
 
-		functions.sendSystemMessage = [this](Player& player, const std::string& msg) { server->sendSystemMessage(player, msg); };
+		functions.sendSystemMessage = [this](const Player& player, const std::string& msg) { server->sendSystemMessage(player, msg); };
 
 		// Make sure this is actually defined in your ServerFunctions struct
 		functions.getLogger = [this]() -> Logger* { return &server->logger; };
@@ -137,7 +137,7 @@ bool PluginManager::loadPlugin(const std::string& path)
 		}
 
 		// Check if plugin already exists
-		if (plugins.find(pluginName) != plugins.end())
+		if (plugins.empty() || plugins.find(pluginName) != plugins.end())
 		{
 			releaseUniqueLock();
 			// Clean up as in original

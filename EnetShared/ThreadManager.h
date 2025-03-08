@@ -73,7 +73,7 @@ public:
      * @param numThreads Number of worker threads (default = hardware concurrency - 1)
      */
 	ThreadManager(size_t numThreads = max(1u, std::thread::hardware_concurrency() - 1))
-	      : pool(numThreads), numThreads(numThreads)
+	      : pool((unsigned int)numThreads), numThreads(numThreads)
 	{
 	}
 

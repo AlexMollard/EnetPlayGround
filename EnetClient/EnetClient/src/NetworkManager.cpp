@@ -1511,73 +1511,73 @@ std::string NetworkManager::analyzeConnectionQuality()
 	// Ping quality analysis
 	if (diagnostics.avgPingMs < 50)
 	{
-		analysis << "✓ Excellent latency (" << diagnostics.avgPingMs << "ms)\n";
+		analysis << "Excellent latency (" << diagnostics.avgPingMs << "ms)\n";
 	}
 	else if (diagnostics.avgPingMs < 100)
 	{
-		analysis << "✓ Good latency (" << diagnostics.avgPingMs << "ms)\n";
+		analysis << "Good latency (" << diagnostics.avgPingMs << "ms)\n";
 	}
 	else if (diagnostics.avgPingMs < 150)
 	{
-		analysis << "⚠ Moderate latency (" << diagnostics.avgPingMs << "ms)\n";
+		analysis << "Moderate latency (" << diagnostics.avgPingMs << "ms)\n";
 	}
 	else
 	{
-		analysis << "✗ Poor latency (" << diagnostics.avgPingMs << "ms)\n";
+		analysis << "Poor latency (" << diagnostics.avgPingMs << "ms)\n";
 	}
 
 	// Jitter analysis
 	if (diagnostics.pingStdDeviation < 10)
 	{
-		analysis << "✓ Excellent stability (jitter: " << diagnostics.pingStdDeviation << "ms)\n";
+		analysis << "Excellent stability (jitter: " << diagnostics.pingStdDeviation << "ms)\n";
 	}
 	else if (diagnostics.pingStdDeviation < 25)
 	{
-		analysis << "✓ Good stability (jitter: " << diagnostics.pingStdDeviation << "ms)\n";
+		analysis << "Good stability (jitter: " << diagnostics.pingStdDeviation << "ms)\n";
 	}
 	else if (diagnostics.pingStdDeviation < 50)
 	{
-		analysis << "⚠ Moderate stability (jitter: " << diagnostics.pingStdDeviation << "ms)\n";
+		analysis << "Moderate stability (jitter: " << diagnostics.pingStdDeviation << "ms)\n";
 	}
 	else
 	{
-		analysis << "✗ Poor stability (jitter: " << diagnostics.pingStdDeviation << "ms)\n";
+		analysis << "Poor stability (jitter: " << diagnostics.pingStdDeviation << "ms)\n";
 	}
 
 	// Packet loss analysis
 	if (diagnostics.packetLossPercentage < 1)
 	{
-		analysis << "✓ Excellent reliability (packet loss: " << diagnostics.packetLossPercentage << "%)\n";
+		analysis << "Excellent reliability (packet loss: " << diagnostics.packetLossPercentage << "%)\n";
 	}
 	else if (diagnostics.packetLossPercentage < 3)
 	{
-		analysis << "✓ Good reliability (packet loss: " << diagnostics.packetLossPercentage << "%)\n";
+		analysis << "Good reliability (packet loss: " << diagnostics.packetLossPercentage << "%)\n";
 	}
 	else if (diagnostics.packetLossPercentage < 8)
 	{
-		analysis << "⚠ Moderate reliability (packet loss: " << diagnostics.packetLossPercentage << "%)\n";
+		analysis << "Moderate reliability (packet loss: " << diagnostics.packetLossPercentage << "%)\n";
 	}
 	else
 	{
-		analysis << "✗ Poor reliability (packet loss: " << diagnostics.packetLossPercentage << "%)\n";
+		analysis << "Poor reliability (packet loss: " << diagnostics.packetLossPercentage << "%)\n";
 	}
 
 	// Connection stability analysis
 	if (diagnostics.disconnectionCount == 0)
 	{
-		analysis << "✓ Perfect connection stability (no disconnections)\n";
+		analysis << "Perfect connection stability (no disconnections)\n";
 	}
 	else if (diagnostics.disconnectionCount <= 2)
 	{
-		analysis << "✓ Good connection stability (" << diagnostics.disconnectionCount << " disconnections)\n";
+		analysis << "Good connection stability (" << diagnostics.disconnectionCount << " disconnections)\n";
 	}
 	else if (diagnostics.disconnectionCount <= 5)
 	{
-		analysis << "⚠ Moderate connection stability (" << diagnostics.disconnectionCount << " disconnections)\n";
+		analysis << "Moderate connection stability (" << diagnostics.disconnectionCount << " disconnections)\n";
 	}
 	else
 	{
-		analysis << "✗ Poor connection stability (" << diagnostics.disconnectionCount << " disconnections)\n";
+		analysis << "Poor connection stability (" << diagnostics.disconnectionCount << " disconnections)\n";
 	}
 
 	// Bandwidth usage analysis
@@ -1588,15 +1588,15 @@ std::string NetworkManager::analyzeConnectionQuality()
 
 		if (bandwidthUsagePercent < 50)
 		{
-			analysis << "✓ Good bandwidth usage (" << bandwidthUsagePercent << "% of limit)\n";
+			analysis << "Good bandwidth usage (" << bandwidthUsagePercent << "% of limit)\n";
 		}
 		else if (bandwidthUsagePercent < 80)
 		{
-			analysis << "⚠ Moderate bandwidth usage (" << bandwidthUsagePercent << "% of limit)\n";
+			analysis << "Moderate bandwidth usage (" << bandwidthUsagePercent << "% of limit)\n";
 		}
 		else
 		{
-			analysis << "✗ High bandwidth usage (" << bandwidthUsagePercent << "% of limit)\n";
+			analysis << "High bandwidth usage (" << bandwidthUsagePercent << "% of limit)\n";
 		}
 	}
 
@@ -1609,19 +1609,19 @@ std::string NetworkManager::analyzeConnectionQuality()
 
 		if (diagnostics.combatPacketSuccessRate >= 99)
 		{
-			analysis << "✓ Excellent combat performance (" << diagnostics.combatPacketSuccessRate << "% success)\n";
+			analysis << "Excellent combat performance (" << diagnostics.combatPacketSuccessRate << "% success)\n";
 		}
 		else if (diagnostics.combatPacketSuccessRate >= 95)
 		{
-			analysis << "✓ Good combat performance (" << diagnostics.combatPacketSuccessRate << "% success)\n";
+			analysis << "Good combat performance (" << diagnostics.combatPacketSuccessRate << "% success)\n";
 		}
 		else if (diagnostics.combatPacketSuccessRate >= 90)
 		{
-			analysis << "⚠ Moderate combat performance (" << diagnostics.combatPacketSuccessRate << "% success)\n";
+			analysis << "Moderate combat performance (" << diagnostics.combatPacketSuccessRate << "% success)\n";
 		}
 		else
 		{
-			analysis << "✗ Poor combat performance (" << diagnostics.combatPacketSuccessRate << "% success)\n";
+			analysis << "Poor combat performance (" << diagnostics.combatPacketSuccessRate << "% success)\n";
 		}
 	}
 
