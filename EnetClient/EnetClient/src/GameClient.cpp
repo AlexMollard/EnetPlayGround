@@ -349,8 +349,6 @@ void GameClient::handlePacket(const ENetPacket* packet)
 				myPosition.y = y;
 				myPosition.z = z;
 				lastSentPosition = myPosition; // Prevent immediate position update
-
-				addChatMessage("System", "Teleported to X=" + parts[0] + " Y=" + parts[1] + " Z=" + parts[2]);
 			}
 		}
 		catch (const std::exception& e)

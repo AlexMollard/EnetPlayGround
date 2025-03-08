@@ -1179,9 +1179,6 @@ void GameServer::handleAuthMessage(const std::string& authDataStr, ENetPeer* pee
 		        // Send authentication response
 		        sendAuthResponse(peer, true, std::to_string(finalPlayerId));
 
-		        // Send welcome message - scheduling as a separate task
-		        threadManager.scheduleTask([this, finalPlayerId, finalUsername]() { sendSystemMessage(finalPlayerId, "Welcome back, " + finalUsername + "!"); });
-
 		        // Broadcast join message - scheduling as a separate task
 		        threadManager.scheduleTask([this, finalUsername]() { broadcastSystemMessage(finalUsername + " has joined the game"); });
 
