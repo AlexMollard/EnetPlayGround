@@ -75,7 +75,7 @@ bool AuthManager::authenticate(const std::string& username, const std::string& p
 	return true;
 }
 
-bool AuthManager::processAuthResponse(const void* packetData, size_t packetLength, const std::function<void(uint32_t)>& authSuccessCallback, const std::function<void(const std::string&)>& authFailedCallback)
+void AuthManager::processAuthResponse(const void* packetData, size_t packetLength, const std::function<void(uint32_t)>& authSuccessCallback, const std::function<void(const std::string&)>& authFailedCallback)
 {
 	// Use the stored callbacks if not provided
 	auto successCallback = authSuccessCallback ? authSuccessCallback : this->authSuccessCallback;
@@ -84,94 +84,59 @@ bool AuthManager::processAuthResponse(const void* packetData, size_t packetLengt
 	std::string message(reinterpret_cast<const char*>(packetData), packetLength);
 
 	// Check if this is an authentication response
-	if (message.substr(0, 13) == "AUTH_RESPONSE:")
+	size_t commaPos = message.find(',', 13);
+	if (commaPos != std::string::npos)
 	{
-		size_t commaPos = message.find(',', 13);
-		if (commaPos != std::string::npos)
+		std::string result = message.substr(14, commaPos - 14);
+
+		if (result == "success")
 		{
-			std::string result = message.substr(13, commaPos - 13);
-
-			if (result == "success")
+			try
 			{
-				try
-				{
-					playerId = std::stoi(message.substr(commaPos + 1));
-					authenticated = true;
+				playerId = std::stoi(message.substr(commaPos + 1));
+				authenticated = true;
 
-					logger.info("Authentication successful! Player ID: " + std::to_string(playerId));
+				logger.info("Authentication successful! Player ID: " + std::to_string(playerId));
 
-					if (successCallback)
-					{
-						// Use thread manager
-						threadManager->scheduleTask([successCallback, pid = playerId]() { successCallback(pid); });
-					}
-				}
-				catch (const std::exception& e)
+				if (successCallback)
 				{
-					logger.error("Failed to parse player ID: " + std::string(e.what()));
-					if (failedCallback)
-					{
-						// Use thread manager
-						threadManager->scheduleTask([failedCallback, errorMsg = std::string("Server sent invalid player ID")]() { failedCallback(errorMsg); });
-					}
+					// Use thread manager
+					threadManager->scheduleTask([successCallback, pid = playerId]() { successCallback(pid); });
 				}
 			}
-			else
+			catch (const std::exception& e)
 			{
-				authenticated = false;
-				std::string errorMessage = message.substr(commaPos + 1);
-				logger.error("Authentication failed: " + errorMessage);
-
+				logger.error("Failed to parse player ID: " + std::string(e.what()));
 				if (failedCallback)
 				{
 					// Use thread manager
-					threadManager->scheduleTask([failedCallback, errorMsg = errorMessage]() { failedCallback(errorMsg); });
+					threadManager->scheduleTask([failedCallback, errorMsg = std::string("Server sent invalid player ID")]() { failedCallback(errorMsg); });
 				}
 			}
 		}
 		else
 		{
-			// Malformed auth response
-			logger.error("Received malformed authentication response");
+			authenticated = false;
+			std::string errorMessage = message.substr(commaPos + 1);
+			logger.error("Authentication failed: " + errorMessage);
+
 			if (failedCallback)
 			{
 				// Use thread manager
-				threadManager->scheduleTask([failedCallback]() { failedCallback("Received malformed authentication response"); });
+				threadManager->scheduleTask([failedCallback, errorMsg = errorMessage]() { failedCallback(errorMsg); });
 			}
 		}
-
-		return true; // Packet was processed as an auth response
 	}
-	else if (message.substr(0, 8) == "WELCOME:")
+	else
 	{
-		// Legacy protocol support
-		try
+		// Malformed auth response
+		logger.error("Received malformed authentication response");
+		if (failedCallback)
 		{
-			playerId = std::stoi(message.substr(8));
-			authenticated = true;
-
-			logger.info("Received legacy welcome. Player ID: " + std::to_string(playerId));
-
-			if (successCallback)
-			{
-				// Use thread manager
-				threadManager->scheduleTask([successCallback, pid = playerId]() { successCallback(pid); });
-			}
+			// Use thread manager
+			threadManager->scheduleTask([failedCallback]() { failedCallback("Received malformed authentication response"); });
 		}
-		catch (const std::exception& e)
-		{
-			logger.error("Failed to parse legacy player ID: " + std::string(e.what()));
-			if (failedCallback)
-			{
-				// Use thread manager
-				threadManager->scheduleTask([failedCallback]() { failedCallback("Server sent invalid player ID"); });
-			}
-		}
-
-		return true; // Packet was processed as a welcome message
 	}
-
-	return false; // Not an auth response packet
 }
 
 void AuthManager::saveCredentials(const std::string& username, const std::string& password)

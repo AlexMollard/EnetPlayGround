@@ -47,9 +47,8 @@ public:
      * @param packetLength Authentication response packet length
      * @param authSuccessCallback Callback for when authentication succeeds
      * @param authFailedCallback Callback for when authentication fails, with error message
-     * @return True if packet was an authentication response and was processed
      */
-	bool processAuthResponse(const void* packetData, size_t packetLength, const std::function<void(uint32_t)>& authSuccessCallback = nullptr, const std::function<void(const std::string&)>& authFailedCallback = nullptr);
+	void processAuthResponse(const void* packetData, size_t packetLength, const std::function<void(uint32_t)>& authSuccessCallback = nullptr, const std::function<void(const std::string&)>& authFailedCallback = nullptr);
 
 	/**
      * Save credentials to file

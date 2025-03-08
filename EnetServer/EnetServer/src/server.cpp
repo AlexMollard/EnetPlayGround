@@ -501,18 +501,17 @@ void GameServer::run()
 				        {
 					        printConsoleHelp();
 				        }
-				        else if (command.substr(0, 9) == "broadcast ")
+				        else if (command.substr(0, 9) == "broadcast")
 				        {
 					        std::string message = command.substr(9);
 					        broadcastSystemMessage(message);
-					        logger.info("Broadcast message sent: " + message);
 				        }
-				        else if (command.substr(0, 5) == "kick ")
+				        else if (command.substr(0, 4) == "kick")
 				        {
 					        std::string playerName = command.substr(5);
 					        kickPlayer(playerName);
 				        }
-				        else if (command.substr(0, 4) == "ban ")
+				        else if (command.substr(0, 3) == "ban")
 				        {
 					        std::string playerName = command.substr(4);
 					        banPlayer(playerName);
@@ -522,12 +521,12 @@ void GameServer::run()
 					        saveAuthData();
 					        logger.info("Player data saved manually");
 				        }
-				        else if (command.substr(0, 10) == "set_admin ")
+				        else if (command.substr(0, 8) == "setadmin")
 				        {
-					        std::string playerName = command.substr(10);
+					        std::string playerName = command.substr(9);
 					        setPlayerAdmin(playerName, true);
 				        }
-				        else if (command.substr(0, 12) == "remove_admin ")
+				        else if (command.substr(0, 11) == "removeadmin")
 				        {
 					        std::string playerName = command.substr(12);
 					        setPlayerAdmin(playerName, false);
@@ -754,10 +753,6 @@ void GameServer::handleClientConnect(const ENetEvent& event)
 
 		        // Send plugin event
 		        pluginManager->dispatchPlayerConnect(newPlayer);
-
-		        // Send welcome message
-		        std::string welcomeMsg = "WELCOME:" + std::to_string(tempId);
-		        sendPacket(event.peer, welcomeMsg, true);
 
 		        logger.info("Temporary player created: " + defaultName);
 
@@ -3017,8 +3012,8 @@ void GameServer::printConsoleHelp()
 	logger.info("kick <username> - Kick a player");
 	logger.info("ban <username> - Ban a player");
 	logger.info("save - Save player data manually");
-	logger.info("set_admin <username> - Grant admin status");
-	logger.info("remove_admin <username> - Remove admin status");
+	logger.info("setadmin <username> - Grant admin status");
+	logger.info("removeadmin <username> - Remove admin status");
 	logger.info("reload - Reload configuration");
 	logger.info("plugins - List loaded plugins");
 	logger.info("loadplugin <path> - Load a plugin");

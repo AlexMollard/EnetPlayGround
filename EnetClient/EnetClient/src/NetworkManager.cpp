@@ -1490,12 +1490,13 @@ bool NetworkManager::processReceivedPacket(const void* packetData, size_t packet
 	std::string message(reinterpret_cast<const char*>(packetData), packetLength);
 
 	// Check if this is an authentication response
-	if (message.substr(0, 13) == "AUTH_RESPONSE:" || message.substr(0, 8) == "WELCOME:")
+	if (message.substr(0, 14) == "AUTH_RESPONSE:")
 	{
 		if (authManager)
 		{
 			// Forward to auth manager and return true if processed
-			return authManager->processAuthResponse(packetData, packetLength, nullptr, nullptr);
+			authManager->processAuthResponse(packetData, packetLength, nullptr, nullptr);
+			return true;
 		}
 	}
 
