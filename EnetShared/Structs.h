@@ -52,7 +52,6 @@ struct Player
 	Position lastValidPosition;
 	ENetPeer* peer;
 	uint32_t lastUpdateTime;
-	uint32_t lastPingTime;
 	uint32_t connectionStartTime;
 	uint32_t failedAuthAttempts;
 	uint32_t totalBytesReceived;

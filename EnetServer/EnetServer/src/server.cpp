@@ -12,7 +12,7 @@
 
 // Constructor
 GameServer::GameServer()
-      : dbManager(logger)
+      : dbManager(logger), threadManager()
 {
 	// Set up logger
 	logger.info("Initializing server...");
@@ -136,7 +136,7 @@ bool GameServer::initializeDatabase()
 void GameServer::initializePluginCommandHandlers()
 {
 	// Plugin commands
-	commandHandlers["plugins"] = [this](Player& player, const std::vector<std::string>& args)
+	commandHandlers["plugins"] = [this](const Player& player, const std::vector<std::string>& args)
 	{
 		if (!player.isAdmin)
 		{
@@ -166,7 +166,7 @@ void GameServer::initializePluginCommandHandlers()
 		}
 	};
 
-	commandHandlers["loadplugin"] = [this](Player& player, const std::vector<std::string>& args)
+	commandHandlers["loadplugin"] = [this](const Player& player, const std::vector<std::string>& args)
 	{
 		if (!player.isAdmin)
 		{
@@ -191,7 +191,7 @@ void GameServer::initializePluginCommandHandlers()
 		}
 	};
 
-	commandHandlers["unloadplugin"] = [this](Player& player, const std::vector<std::string>& args)
+	commandHandlers["unloadplugin"] = [this](const Player& player, const std::vector<std::string>& args)
 	{
 		if (!player.isAdmin)
 		{
@@ -216,7 +216,7 @@ void GameServer::initializePluginCommandHandlers()
 		}
 	};
 
-	commandHandlers["reloadplugin"] = [this](Player& player, const std::vector<std::string>& args)
+	commandHandlers["reloadplugin"] = [this](const Player& player, const std::vector<std::string>& args)
 	{
 		if (!player.isAdmin)
 		{
@@ -241,7 +241,7 @@ void GameServer::initializePluginCommandHandlers()
 		}
 	};
 
-	commandHandlers["reloadallplugins"] = [this](Player& player, const std::vector<std::string>& args)
+	commandHandlers["reloadallplugins"] = [this](const Player& player, const std::vector<std::string>& args)
 	{
 		if (!player.isAdmin)
 		{
@@ -311,16 +311,13 @@ void GameServer::start()
 	}
 
 	isRunning = true;
+	stopRequested = false;
 	logger.info("Server starting...");
 
-	// Start network thread
-	networkThread = std::thread(&GameServer::networkThreadFunc, this);
-
-	// Start update thread
-	updateThread = std::thread(&GameServer::updateThreadFunc, this);
-
-	// Start save thread
-	saveThread = std::thread(&GameServer::saveThreadFunc, this);
+	// Schedule all recurring tasks
+	scheduleRecurringTask([this]() { networkTaskFunc(); }, 1, networkTaskFuture, "Network");
+	scheduleRecurringTask([this]() { updateTaskFunc(); }, config.broadcastRateMs, updateTaskFuture, "Update");
+	scheduleRecurringTask([this]() { saveTaskFunc(); }, config.saveIntervalMs, saveTaskFuture, "Save");
 
 	logger.info("Server started successfully");
 
@@ -340,6 +337,7 @@ void GameServer::shutdown()
 
 	// Signal threads to stop
 	isRunning = false;
+	stopRequested = true;
 
 	// Unload plugins explicitly before shutting down threads
 	if (pluginManager)
@@ -351,13 +349,46 @@ void GameServer::shutdown()
 		}
 	}
 
-	// Wait for threads to finish
-	if (networkThread.joinable())
-		networkThread.join();
-	if (updateThread.joinable())
-		updateThread.join();
-	if (saveThread.joinable())
-		saveThread.join();
+	// Wait for ongoing tasks to complete
+	try
+	{
+		// Wait for a reasonable timeout on each task
+		const auto timeout = std::chrono::seconds(5);
+
+		if (networkTaskFuture.valid())
+		{
+			auto status = networkTaskFuture.wait_for(timeout);
+			if (status != std::future_status::ready)
+			{
+				logger.warning("Network task didn't finish in time, continuing shutdown...");
+			}
+		}
+
+		if (updateTaskFuture.valid())
+		{
+			auto status = updateTaskFuture.wait_for(timeout);
+			if (status != std::future_status::ready)
+			{
+				logger.warning("Update task didn't finish in time, continuing shutdown...");
+			}
+		}
+
+		if (saveTaskFuture.valid())
+		{
+			auto status = saveTaskFuture.wait_for(timeout);
+			if (status != std::future_status::ready)
+			{
+				logger.warning("Save task didn't finish in time, continuing shutdown...");
+			}
+		}
+
+		// Wait for all remaining tasks to complete
+		threadManager.waitForTasks();
+	}
+	catch (const std::exception& e)
+	{
+		logger.error("Exception during task shutdown: " + std::string(e.what()));
+	}
 
 	// Save player data
 	saveAuthData();
@@ -446,82 +477,91 @@ void GameServer::run()
 		// Clear the console input protection
 		Logger::clearConsoleInputLine();
 
-		// Process command
+		// Process commands via thread manager
 		if (command == "quit" || command == "exit")
 		{
 			break;
 		}
-		else if (command == "status")
-		{
-			printServerStatus();
-		}
-		else if (command == "players")
-		{
-			printPlayerList();
-		}
-		else if (command == "help")
-		{
-			printConsoleHelp();
-		}
-		else if (command.substr(0, 9) == "broadcast ")
-		{
-			std::string message = command.substr(9);
-			broadcastSystemMessage(message);
-			logger.info("Broadcast message sent: " + message);
-		}
-		else if (command.substr(0, 5) == "kick ")
-		{
-			std::string playerName = command.substr(5);
-			kickPlayer(playerName);
-		}
-		else if (command.substr(0, 4) == "ban ")
-		{
-			std::string playerName = command.substr(4);
-			banPlayer(playerName);
-		}
-		else if (command == "save")
-		{
-			saveAuthData();
-			logger.info("Player data saved manually");
-		}
-		else if (command.substr(0, 10) == "set_admin ")
-		{
-			std::string playerName = command.substr(10);
-			setPlayerAdmin(playerName, true);
-		}
-		else if (command.substr(0, 12) == "remove_admin ")
-		{
-			std::string playerName = command.substr(12);
-			setPlayerAdmin(playerName, false);
-		}
-		else if (command == "reload")
-		{
-			loadConfig();
-			logger.info("Configuration reloaded");
-		}
-		else if (command.substr(0, 9) == "loglevel ")
-		{
-			try
-			{
-				int level = std::stoi(command.substr(9));
-				logger.setLogLevel((LogLevel) level);
-			}
-			catch (const std::exception&)
-			{
-				logger.error("Invalid log level: " + command.substr(9));
-			}
-		}
-		else if (command.substr(0, 7) == "plugins")
-		{
-			for (auto& plugin: pluginManager->getLoadedPlugins())
-			{
-				logger.info(plugin);
-			}
-		}
 		else if (!command.empty())
 		{
-			logger.info("Unknown command: " + command);
-			logger.info("Type 'help' for available commands");
+			// Use the thread manager to handle the command processing
+			// This is a low-priority task that doesn't block the main thread
+			threadManager.scheduleTask(
+			        [this, command]()
+			        {
+				        if (command == "status")
+				        {
+					        printServerStatus();
+				        }
+				        else if (command == "players")
+				        {
+					        printPlayerList();
+				        }
+				        else if (command == "help")
+				        {
+					        printConsoleHelp();
+				        }
+				        else if (command.substr(0, 9) == "broadcast ")
+				        {
+					        std::string message = command.substr(9);
+					        broadcastSystemMessage(message);
+					        logger.info("Broadcast message sent: " + message);
+				        }
+				        else if (command.substr(0, 5) == "kick ")
+				        {
+					        std::string playerName = command.substr(5);
+					        kickPlayer(playerName);
+				        }
+				        else if (command.substr(0, 4) == "ban ")
+				        {
+					        std::string playerName = command.substr(4);
+					        banPlayer(playerName);
+				        }
+				        else if (command == "save")
+				        {
+					        saveAuthData();
+					        logger.info("Player data saved manually");
+				        }
+				        else if (command.substr(0, 10) == "set_admin ")
+				        {
+					        std::string playerName = command.substr(10);
+					        setPlayerAdmin(playerName, true);
+				        }
+				        else if (command.substr(0, 12) == "remove_admin ")
+				        {
+					        std::string playerName = command.substr(12);
+					        setPlayerAdmin(playerName, false);
+				        }
+				        else if (command == "reload")
+				        {
+					        loadConfig();
+					        logger.info("Configuration reloaded");
+				        }
+				        else if (command.substr(0, 9) == "loglevel ")
+				        {
+					        try
+					        {
+						        int level = std::stoi(command.substr(9));
+						        logger.setLogLevel((LogLevel) level);
+					        }
+					        catch (const std::exception&)
+					        {
+						        logger.error("Invalid log level: " + command.substr(9));
+					        }
+				        }
+				        else if (command.substr(0, 7) == "plugins")
+				        {
+					        for (auto& plugin: pluginManager->getLoadedPlugins())
+					        {
+						        logger.info(plugin);
+					        }
+				        }
+				        else if (!command.empty())
+				        {
+					        logger.info("Unknown command: " + command);
+					        logger.info("Type 'help' for available commands");
+				        }
+			        });
 		}
 	}
 
@@ -529,361 +569,426 @@ void GameServer::run()
 }
 
 // Network thread function
-void GameServer::networkThreadFunc()
+void GameServer::networkTaskFunc()
 {
-	logger.info("Network thread started");
-
 	ENetEvent event;
 
-	while (isRunning)
+	// Process network events
+	while (enet_host_service(server, &event, 10) > 0)
 	{
-		while (enet_host_service(server, &event, 10) > 0)
+		switch (event.type)
 		{
-			switch (event.type)
+			case ENET_EVENT_TYPE_CONNECT:
 			{
-				case ENET_EVENT_TYPE_CONNECT:
-				{
-					handleClientConnect(event);
-					break;
-				}
-
-				case ENET_EVENT_TYPE_RECEIVE:
-				{
-					handleClientMessage(event);
-
-					// Clean up packet
-					enet_packet_destroy(event.packet);
-					break;
-				}
-
-				case ENET_EVENT_TYPE_DISCONNECT:
-				{
-					handleClientDisconnect(event);
-					break;
-				}
-
-				default:
-					break;
+				handleClientConnect(event);
+				break;
 			}
+
+			case ENET_EVENT_TYPE_RECEIVE:
+			{
+				handleClientMessage(event);
+
+				// Clean up packet
+				enet_packet_destroy(event.packet);
+				break;
+			}
+
+			case ENET_EVENT_TYPE_DISCONNECT:
+			{
+				handleClientDisconnect(event);
+				break;
+			}
+
+			default:
+				break;
 		}
-
-		// Small sleep to reduce CPU usage
-		std::this_thread::sleep_for(std::chrono::milliseconds(1));
 	}
-
-	logger.info("Network thread stopped");
 }
 
 // Update thread function
-void GameServer::updateThreadFunc()
+void GameServer::updateTaskFunc()
 {
-	logger.info("Update thread started");
+	// Get current time
+	uint32_t currentTime = Utils::getCurrentTimeMs();
 
-	while (isRunning)
+	// Check for plugin updates periodically
+	if (currentTime - lastPluginCheckTime > pluginCheckIntervalMs)
 	{
-		// Get current time
-		uint32_t currentTime = Utils::getCurrentTimeMs();
-
-		// Check for plugin updates periodically
-		if (currentTime - lastPluginCheckTime > pluginCheckIntervalMs)
-		{
-			pluginManager->checkForPluginUpdates();
-			lastPluginCheckTime = currentTime;
-		}
-
-		// Synchronize player stats
-		syncPlayerStats();
-
-		// Dispatch server tick to plugins
-		pluginManager->dispatchServerTick();
-
-		// Broadcast world state
-		broadcastWorldState();
-
-		// Check for timeouts
-		checkTimeouts();
-
-		// Sleep for broadcast interval
-		std::this_thread::sleep_for(std::chrono::milliseconds(config.broadcastRateMs));
+		threadManager.scheduleReadTask({ GameResources::PluginsId },
+		        [this]()
+		        {
+			        pluginManager->checkForPluginUpdates();
+			        lastPluginCheckTime = Utils::getCurrentTimeMs();
+		        });
 	}
 
-	logger.info("Update thread stopped");
+	// Synchronize player stats (needs access to Players and PeerStats)
+	threadManager.scheduleResourceTask({ GameResources::PlayersId, GameResources::PeerStatsId },
+	        [this]()
+	        {
+		        // For each player, copy stats from the lightweight objects
+		        for (auto& playerPair: players)
+		        {
+			        Player& player = playerPair.second;
+			        if (player.peer != nullptr)
+			        {
+				        uintptr_t peerKey = reinterpret_cast<uintptr_t>(player.peer);
+				        auto statsIt = peerStats.find(peerKey);
+				        if (statsIt != peerStats.end())
+				        {
+					        player.totalBytesSent = statsIt->second.totalBytesSent.load();
+					        player.totalBytesReceived = statsIt->second.totalBytesReceived.load();
+				        }
+			        }
+		        }
+
+		        // Clean up stats for disconnected peers (optional)
+		        std::vector<uintptr_t> keysToRemove;
+		        for (auto& statsPair: peerStats)
+		        {
+			        bool found = false;
+			        for (auto& playerPair: players)
+			        {
+				        if (playerPair.second.peer != nullptr && reinterpret_cast<uintptr_t>(playerPair.second.peer) == statsPair.first)
+				        {
+					        found = true;
+					        break;
+				        }
+			        }
+			        if (!found)
+			        {
+				        keysToRemove.push_back(statsPair.first);
+			        }
+		        }
+
+		        for (uintptr_t key: keysToRemove)
+		        {
+			        peerStats.erase(key);
+		        }
+	        });
+
+	// Dispatch server tick to plugins
+	threadManager.scheduleReadTask({ GameResources::PluginsId }, [this]() { pluginManager->dispatchServerTick(); });
+
+	// Broadcast world state (needs access to Players and SpatialGrid)
+	threadManager.scheduleReadTask({ GameResources::PlayersId, GameResources::SpatialGridId }, [this]() { broadcastWorldState(); });
+
+	// Check for timeouts
+	threadManager.scheduleResourceTask({ GameResources::PlayersId }, [this]() { checkTimeouts(); });
 }
 
 // Save thread function
-void GameServer::saveThreadFunc()
+void GameServer::saveTaskFunc()
 {
-	logger.info("Save thread started");
+	// Save player data
+	saveAuthData();
+	logger.debug("Player data auto-saved");
+}
 
-	while (isRunning)
+void GameServer::scheduleRecurringTask(std::function<void()> task, uint32_t intervalMs, std::future<void>& futureHandle, const std::string& taskName)
+{
+	// Create a task that will repeatedly run until the server is shut down
+	auto recurringTask = [this, task, intervalMs, taskName]()
 	{
-		// Save player data periodically
-		saveAuthData();
-		logger.debug("Player data auto-saved");
+		logger.info(taskName + " task started");
 
-		// Sleep for save interval
-		std::this_thread::sleep_for(std::chrono::milliseconds(config.saveIntervalMs));
-	}
+		while (!stopRequested)
+		{
+			// Execute the task
+			task();
 
-	logger.info("Save thread stopped");
+			// Sleep for the interval
+			auto endTime = std::chrono::steady_clock::now() + std::chrono::milliseconds(intervalMs);
+			while (std::chrono::steady_clock::now() < endTime && !stopRequested)
+			{
+				// Check if shutdown was requested every 100ms
+				std::this_thread::sleep_for(std::chrono::milliseconds(100));
+			}
+		}
+
+		logger.info(taskName + " task stopped");
+	};
+
+	// Schedule the recurring task and save its future
+	futureHandle = threadManager.scheduleTaskWithResult(recurringTask);
 }
 
 // Handle client connection
 void GameServer::handleClientConnect(const ENetEvent& event)
 {
-	stats.totalConnections++;
+	// Use resource task with write access to Players and the SpatialGrid
+	threadManager.scheduleResourceTask({ GameResources::PlayersId, GameResources::PeerDataId, GameResources::SpatialGridId },
+	        [this, event]()
+	        {
+		        stats.totalConnections++;
 
-	std::string ipAddress = Utils::peerAddressToString(event.peer->address);
-	logger.info("New client connected from " + ipAddress);
+		        std::string ipAddress = Utils::peerAddressToString(event.peer->address);
+		        logger.info("New client connected from " + ipAddress);
 
-	// Create temporary player entry
-	uint32_t tempId = 0; // Use 0 for unauthenticated players
-	std::string defaultName = "Guest" + std::to_string(Utils::getCurrentTimeMs() % 10000);
+		        // Create temporary player entry
+		        uint32_t tempId = 0; // Use 0 for unauthenticated players
+		        std::string defaultName = "Guest" + std::to_string(Utils::getCurrentTimeMs() % 10000);
 
-	std::scoped_lock<std::mutex> lock(playersMutex);
+		        Player newPlayer;
+		        newPlayer.id = tempId;
+		        newPlayer.name = defaultName;
+		        newPlayer.position = config.spawnPosition;
+		        newPlayer.lastValidPosition = config.spawnPosition;
+		        newPlayer.peer = event.peer;
+		        newPlayer.lastUpdateTime = Utils::getCurrentTimeMs();
+		        newPlayer.connectionStartTime = Utils::getCurrentTimeMs();
+		        newPlayer.lastPositionUpdateTime = Utils::getCurrentTimeMs();
+		        newPlayer.failedAuthAttempts = 0;
+		        newPlayer.totalBytesReceived = 0;
+		        newPlayer.totalBytesSent = 0;
+		        newPlayer.pingMs = 0;
+		        newPlayer.isAuthenticated = false;
+		        newPlayer.isAdmin = false;
+		        newPlayer.ipAddress = ipAddress;
 
-	Player newPlayer;
-	newPlayer.id = tempId;
-	newPlayer.name = defaultName;
-	newPlayer.position = config.spawnPosition;
-	newPlayer.lastValidPosition = config.spawnPosition;
-	newPlayer.peer = event.peer;
-	newPlayer.lastUpdateTime = Utils::getCurrentTimeMs();
-	newPlayer.lastPingTime = Utils::getCurrentTimeMs();
-	newPlayer.connectionStartTime = Utils::getCurrentTimeMs();
-	newPlayer.lastPositionUpdateTime = Utils::getCurrentTimeMs();
-	newPlayer.failedAuthAttempts = 0;
-	newPlayer.totalBytesReceived = 0;
-	newPlayer.totalBytesSent = 0;
-	newPlayer.pingMs = 0;
-	newPlayer.isAuthenticated = false;
-	newPlayer.isAdmin = false;
-	newPlayer.ipAddress = ipAddress;
+		        // Store player pointer in peer data
+		        event.peer->data = reinterpret_cast<void*>(new uint32_t(tempId));
 
-	// Store player pointer in peer data
-	event.peer->data = reinterpret_cast<void*>(new uint32_t(tempId));
+		        // Add to players map (using peer pointer as key for unauthenticated players)
+		        players[reinterpret_cast<uintptr_t>(event.peer)] = newPlayer;
 
-	// Add to players map (using peer pointer as key for unauthenticated players)
-	players[reinterpret_cast<uintptr_t>(event.peer)] = newPlayer;
+		        // Send plugin event
+		        pluginManager->dispatchPlayerConnect(newPlayer);
 
-	// Send plugin event
-	pluginManager->dispatchPlayerConnect(newPlayer);
+		        // Send welcome message
+		        std::string welcomeMsg = "WELCOME:" + std::to_string(tempId);
+		        sendPacket(event.peer, welcomeMsg, true);
 
-	// Send welcome message
-	std::string welcomeMsg = "WELCOME:" + std::to_string(tempId);
-	sendPacket(event.peer, welcomeMsg, true);
+		        logger.info("Temporary player created: " + defaultName);
 
-	logger.info("Temporary player created: " + defaultName);
-
-	// Update concurrent player count
-	if (players.size() > stats.maxConcurrentPlayers)
-	{
-		stats.maxConcurrentPlayers = players.size();
-	}
+		        // Update concurrent player count
+		        if (players.size() > stats.maxConcurrentPlayers)
+		        {
+			        stats.maxConcurrentPlayers = players.size();
+		        }
+	        });
 }
 
 // Handle client message
 void GameServer::handleClientMessage(const ENetEvent& event)
 {
-	// Update stats
+	// First, update stats and get the basic information that doesn't require locking
 	stats.totalPacketsReceived++;
 	stats.totalBytesReceived += event.packet->dataLength;
 
-	// Get player ID from peer data
-	uint32_t* ptrPlayerId = reinterpret_cast<uint32_t*>(event.peer->data);
-	if (ptrPlayerId == nullptr)
-	{
-		logger.error("Received message from peer with no ID data");
-		return;
-	}
-
-	uint32_t playerId = *ptrPlayerId;
-
-	// Find player
-	Player* player = nullptr;
-	{
-		std::scoped_lock<std::mutex> lock(playersMutex);
-
-		if (playerId == 0)
-		{
-			// Unauthenticated player, use peer pointer as key
-			auto it = players.find(reinterpret_cast<uintptr_t>(event.peer));
-			if (it != players.end())
-			{
-				player = &it->second;
-			}
-		}
-		else
-		{
-			auto it = players.find(playerId);
-			if (it != players.end())
-			{
-				player = &it->second;
-			}
-		}
-	}
-
-	if (player == nullptr)
-	{
-		logger.error("Received message from unknown player. ID: " + std::to_string(playerId));
-		return;
-	}
-
-	// Update player's last activity time
-	player->lastUpdateTime = Utils::getCurrentTimeMs();
-	player->totalBytesReceived += event.packet->dataLength;
-
-	// Parse message
+	// Parse message outside resource locks for efficiency
 	std::string message(reinterpret_cast<char*>(event.packet->data), event.packet->dataLength);
-	logger.logNetworkEvent("Message from " + player->name + ": " + message);
 
-	// Debug log (skip position updates to avoid spam)
-	//if (message.substr(0, 9) != "POSITION:" && message.substr(0, 5) != "PING:") {
-	//    logger.debug("Message from " + player->name + ": " + message);
-	//}
+	// Now handle the message with the appropriate resource access
+	threadManager.scheduleResourceTask(
+	        {
+	                GameResources::PlayersId,   // Need access to players map
+	                GameResources::PeerDataId,  // Need access to peer->data
+	                GameResources::PeerStatsId, // For updating statistics
+	                GameResources::PluginsId    // For plugin event dispatch
+	        },
+	        [this, event, message]()
+	        {
+		        // Get player ID from peer data
+		        uint32_t* ptrPlayerId = reinterpret_cast<uint32_t*>(event.peer->data);
+		        if (ptrPlayerId == nullptr)
+		        {
+			        logger.error("Received message from peer with no ID data");
+			        return;
+		        }
 
-	// Send of plugin event, This will hopefully fully replace all the code below in the future
-	pluginManager->dispatchPlayerMessage(*player, message);
+		        uint32_t playerId = *ptrPlayerId;
 
-	// Handle different message types
-	if (message.substr(0, 5) == "AUTH:")
-	{
-		handleAuthMessage(message.substr(5), event.peer);
-	}
-	else if (message.substr(0, 11) == "MOVE_DELTA:" && player->isAuthenticated)
-	{
-		handleDeltaPositionUpdate(*player, message.substr(11));
-	}
-	else if (message.substr(0, 9) == "POSITION:" && player->isAuthenticated)
-	{
-		handleSendPosition(*player);
-	}
-	else if (message.substr(0, 5) == "CHAT:" && player->isAuthenticated)
-	{
-		handleChatMessage(*player, message.substr(5));
-	}
-	else if (message.substr(0, 5) == "PING:")
-	{
-		handlePingMessage(*player, message.substr(5));
-	}
-	else if (message.substr(0, 8) == "COMMAND:" && player->isAuthenticated)
-	{
-		handleCommandMessage(*player, message.substr(8));
-	}
-	else if (!player->isAuthenticated && message.substr(0, 8) == "COMMAND:")
-	{
-		// Special handling for login command from unauthenticated player
-		std::vector<std::string> parts = Utils::splitString(message, ' ');
-		if (parts.empty())
-			return;
+		        // Find player - all in one lookup without separate mutex locks
+		        Player* player = nullptr;
 
-		if (parts[0].substr(0, 13) == "COMMAND:login")
-		{
-			if (parts.size() >= 3)
-			{
-				std::string username = parts[1];
-				std::string password = parts[2];
-				// Pass the peer pointer instead of player reference
-				handleAuthMessage(username + "," + password, player->peer);
-			}
-			else
-			{
-				sendSystemMessage(*player, "Usage: /login username password");
-			}
-		}
-		else if (parts[0].substr(0, 16) == "COMMAND:register")
-		{
-			if (parts.size() >= 3)
-			{
-				std::string username = parts[1];
-				std::string password = parts[2];
-				handleRegistration(*player, username, password);
-			}
-			else
-			{
-				sendSystemMessage(*player, "Usage: /register username password");
-			}
-		}
-		else
-		{
-			sendSystemMessage(*player, "You must log in first. Use /login username password");
-		}
-	}
+		        if (playerId == 0)
+		        {
+			        // Unauthenticated player, use peer pointer as key
+			        auto it = players.find(reinterpret_cast<uintptr_t>(event.peer));
+			        if (it != players.end())
+			        {
+				        player = &it->second;
+			        }
+		        }
+		        else
+		        {
+			        auto it = players.find(playerId);
+			        if (it != players.end())
+			        {
+				        player = &it->second;
+			        }
+		        }
+
+		        if (player == nullptr)
+		        {
+			        logger.error("Received message from unknown player. ID: " + std::to_string(playerId));
+			        return;
+		        }
+
+		        // Update player's last activity time
+		        player->lastUpdateTime = Utils::getCurrentTimeMs();
+		        player->totalBytesReceived += event.packet->dataLength;
+
+		        // Log the message
+		        logger.logNetworkEvent("Message from " + player->name + ": " + message);
+
+		        // Send plugin event
+		        pluginManager->dispatchPlayerMessage(*player, message);
+
+		        // Handle different message types - each with appropriate task scheduling
+		        if (message.substr(0, 5) == "AUTH:")
+		        {
+			        // Release current resource locks before handling auth
+			        // Schedule a new task for auth handling
+			        threadManager.scheduleTask([this, message, eventPeer = event.peer]() { handleAuthMessage(message.substr(5), eventPeer); });
+		        }
+		        else if (message.substr(0, 11) == "MOVE_DELTA:" && player->isAuthenticated)
+		        {
+			        // For move operations, we need SpatialGrid access too
+			        // Schedule a separate task with the right resources
+			        threadManager.scheduleResourceTask({ GameResources::PlayersId, GameResources::SpatialGridId }, [this, playerId = player->id, message]() { handleDeltaPositionUpdate(playerId, message.substr(11)); });
+		        }
+		        else if (message.substr(0, 9) == "POSITION:" && player->isAuthenticated)
+		        {
+			        // Position updates need SpatialGrid too
+			        threadManager.scheduleResourceTask({ GameResources::PlayersId, GameResources::SpatialGridId }, [this, playerId = player->id]() { handleSendPosition(playerId); });
+		        }
+		        else if (message.substr(0, 5) == "CHAT:" && player->isAuthenticated)
+		        {
+			        // Chat needs Chat resource
+			        threadManager.scheduleResourceTask({ GameResources::ChatId, GameResources::PlayersId }, [this, playerCopy = *player, message]() { handleChatMessage(playerCopy, message.substr(5)); });
+		        }
+		        else if (message.substr(0, 5) == "PING:")
+		        {
+			        // Ping is simple, just needs player resources
+			        threadManager.scheduleResourceTask({ GameResources::PlayersId }, [this, playerCopy = *player, message]() { handlePingMessage(playerCopy, message.substr(5)); });
+		        }
+		        else if (message.substr(0, 8) == "COMMAND:" && player->isAuthenticated)
+		        {
+			        // Commands need various resources depending on the command
+			        // For simplicity, we'll use this basic set of resources
+			        threadManager.scheduleResourceTask({ GameResources::PlayersId, GameResources::AuthId, GameResources::ChatId }, [this, playerCopy = *player, message]() { handleCommandMessage(playerCopy, message.substr(8)); });
+		        }
+		        else if (!player->isAuthenticated && message.substr(0, 8) == "COMMAND:")
+		        {
+			        // Special handling for login command from unauthenticated player
+			        std::vector<std::string> parts = Utils::splitString(message, ' ');
+			        if (parts.empty())
+				        return;
+
+			        if (parts[0].substr(0, 13) == "COMMAND:login")
+			        {
+				        if (parts.size() >= 3)
+				        {
+					        std::string username = parts[1];
+					        std::string password = parts[2];
+
+					        // Schedule a new task for auth handling
+					        threadManager.scheduleTask([this, username, password, playerPeer = player->peer]() { handleAuthMessage(username + "," + password, playerPeer); });
+				        }
+				        else
+				        {
+					        sendSystemMessage(*player, "Usage: /login username password");
+				        }
+			        }
+			        else if (parts[0].substr(0, 16) == "COMMAND:register")
+			        {
+				        if (parts.size() >= 3)
+				        {
+					        std::string username = parts[1];
+					        std::string password = parts[2];
+
+					        // Schedule a new task for registration handling
+					        threadManager.scheduleTask([this, username, password, playerCopy = *player]() { handleRegistration(playerCopy, username, password); });
+				        }
+				        else
+				        {
+					        sendSystemMessage(*player, "Usage: /register username password");
+				        }
+			        }
+			        else
+			        {
+				        sendSystemMessage(*player, "You must log in first. Use /login username password");
+			        }
+		        }
+	        });
 }
 
 // Handle client disconnect
 void GameServer::handleClientDisconnect(const ENetEvent& event)
 {
-	// Get player ID from peer data with proper locking
-	uint32_t playerId = 0;
-	{
-		std::scoped_lock<std::mutex> peerDataLock(peerDataMutex);
-		uint32_t* ptrPlayerId = reinterpret_cast<uint32_t*>(event.peer->data);
-		if (ptrPlayerId != nullptr)
-		{
-			playerId = *ptrPlayerId;
-		}
-	}
+	// Use a resource task that needs access to all relevant resources
+	threadManager.scheduleResourceTask(
+	        {
+	                GameResources::PeerDataId,    // For peer->data access
+	                GameResources::PeerStatsId,   // For peerStats map
+	                GameResources::PlayersId,     // For players map
+	                GameResources::SpatialGridId, // For spatial grid updates
+	                GameResources::PluginsId      // For plugin dispatch
+	        },
+	        [this, event]()
+	        {
+		        // Get player ID from peer data
+		        uint32_t playerId = 0;
+		        uint32_t* ptrPlayerId = reinterpret_cast<uint32_t*>(event.peer->data);
+		        if (ptrPlayerId != nullptr)
+		        {
+			        playerId = *ptrPlayerId;
+		        }
 
-	// Clean up stats
-	{
-		std::scoped_lock<std::mutex> statsLock(peerStatsMutex);
-		peerStats.erase(reinterpret_cast<uintptr_t>(event.peer));
-	}
+		        // Clean up stats
+		        peerStats.erase(reinterpret_cast<uintptr_t>(event.peer));
 
-	// Handle cleanup based on authentication status
-	std::string playerName;
-	{
-		std::scoped_lock<std::mutex> lock(playersMutex);
+		        // Handle cleanup based on authentication status
+		        std::string playerName;
 
-		if (playerId == 0)
-		{
-			// Unauthenticated player, use peer pointer as key
-			auto it = players.find(reinterpret_cast<uintptr_t>(event.peer));
-			if (it != players.end())
-			{
-				pluginManager->dispatchPlayerDisconnect(it->second);
-				playerName = it->second.name;
-				players.erase(it);
-			}
-		}
-		else
-		{
-			// Authenticated player
-			auto it = players.find(playerId);
-			if (it != players.end())
-			{
-				pluginManager->dispatchPlayerDisconnect(it->second);
-				playerName = it->second.name;
-				Position lastPos = it->second.position;
+		        if (playerId == 0)
+		        {
+			        // Unauthenticated player, use peer pointer as key
+			        auto it = players.find(reinterpret_cast<uintptr_t>(event.peer));
+			        if (it != players.end())
+			        {
+				        pluginManager->dispatchPlayerDisconnect(it->second);
+				        playerName = it->second.name;
+				        players.erase(it);
+			        }
+		        }
+		        else
+		        {
+			        // Authenticated player
+			        auto it = players.find(playerId);
+			        if (it != players.end())
+			        {
+				        pluginManager->dispatchPlayerDisconnect(it->second);
+				        playerName = it->second.name;
+				        Position lastPos = it->second.position;
 
-				// Pass the data we already have
-				savePlayerData(playerName, lastPos);
+				        // Since savePlayerData accesses Auth resource, schedule it separately
+				        // to avoid resource deadlocks
+				        threadManager.scheduleResourceTask({ GameResources::AuthId, GameResources::DatabaseId }, [this, playerName, lastPos]() { savePlayerData(playerName, lastPos); });
 
-				// Remove from spatial grid
-				spatialGrid.removeEntity(playerId, it->second.position);
+				        // Remove from spatial grid
+				        spatialGrid.removeEntity(playerId, it->second.position);
 
-				// Remove from players map
-				players.erase(it);
-			}
-		}
-	}
+				        // Remove from players map
+				        players.erase(it);
+			        }
+		        }
 
-	// Clean up peer data ONCE, at the end
-	{
-		std::scoped_lock<std::mutex> peerDataLock(peerDataMutex);
-		uint32_t* ptrPlayerId = reinterpret_cast<uint32_t*>(event.peer->data);
-		delete ptrPlayerId;
-		event.peer->data = nullptr;
-	}
+		        // Clean up peer data
+		        delete ptrPlayerId;
+		        event.peer->data = nullptr;
 
-	logger.info("Player disconnected: " + playerName + " (ID: " + std::to_string(playerId) + ")");
+		        logger.info("Player disconnected: " + playerName + " (ID: " + std::to_string(playerId) + ")");
 
-	// Broadcast player disconnect if it was an authenticated player
-	if (playerId != 0)
-	{
-		broadcastSystemMessage(playerName + " has left the game");
-	}
+		        // Broadcast player disconnect if it was an authenticated player
+		        if (playerId != 0)
+		        {
+			        // Schedule separately since broadcast also needs access to resources
+			        threadManager.scheduleTask([this, playerName]() { broadcastSystemMessage(playerName + " has left the game"); });
+		        }
+	        });
 }
 
 // Handle authentication message
@@ -896,203 +1001,208 @@ void GameServer::handleAuthMessage(const std::string& authDataStr, ENetPeer* pee
 		return;
 	}
 
-	// Find player by peer pointer before we do anything else
-	uint32_t playerId = 0;
-	Player* playerPtr = nullptr;
-	uintptr_t peerKey = reinterpret_cast<uintptr_t>(peer);
+	// Find player and authenticate - needs access to Players and Auth resources
+	threadManager.scheduleResourceTask(
+	        {
+	                GameResources::PlayersId,    // For accessing players map
+	                GameResources::AuthId,       // For accessing authentication data
+	                GameResources::PeerDataId,   // For peer->data access
+	                GameResources::SpatialGridId // For spatial grid updates
+	        },
+	        [this, authDataStr, peer]()
+	        {
+		        // Find player by peer pointer
+		        uint32_t playerId = 0;
+		        Player* playerPtr = nullptr;
+		        uintptr_t peerKey = reinterpret_cast<uintptr_t>(peer);
 
-	{
-		std::scoped_lock<std::mutex> lock(playersMutex);
-		auto it = players.find(peerKey);
-		if (it == players.end())
-		{
-			logger.error("Auth attempt from unknown peer");
-			return;
-		}
-		playerPtr = &it->second;
-	}
-
-	// Now use a local copy of the player instead of a reference
-	Player player = *playerPtr;
-
-	auto parts = Utils::splitString(authDataStr, ',');
-	if (parts.size() < 2)
-	{
-		sendSystemMessage(player, "Invalid authentication format");
-		logger.error("Invalid auth format from " + player.ipAddress);
-		return;
-	}
-
-	std::string username = parts[0];
-	std::string password = parts[1];
-
-	// Check if too many failed attempts
-	if (player.failedAuthAttempts >= MAX_PASSWORD_ATTEMPTS)
-	{
-		sendAuthResponse(peer, false, "Too many failed attempts. Please reconnect.");
-		logger.error("Too many auth attempts from " + player.ipAddress);
-
-		// Disconnect the player after a delay
-		std::thread(
-		        [this, peerCopy = peer]()
+		        auto it = players.find(peerKey);
+		        if (it == players.end())
 		        {
-			        std::this_thread::sleep_for(std::chrono::seconds(1));
-			        enet_peer_disconnect(peerCopy, 0);
-		        })
-		        .detach();
+			        logger.error("Auth attempt from unknown peer");
+			        return;
+		        }
 
-		return;
-	}
+		        // Use a local copy of the player
+		        Player player = it->second;
 
-	// Reset variables for authentication check
-	bool success = false;
-	std::string response;
-	AuthData authData;
+		        auto parts = Utils::splitString(authDataStr, ',');
+		        if (parts.size() < 2)
+		        {
+			        sendSystemMessage(player, "Invalid authentication format");
+			        logger.error("Invalid auth format from " + player.ipAddress);
+			        return;
+		        }
 
-	// Authenticate player
-	{
-		std::scoped_lock<std::mutex> lock(authMutex);
+		        std::string username = parts[0];
+		        std::string password = parts[1];
 
-		auto it = authenticatedPlayers.find(username);
-		if (it != authenticatedPlayers.end())
-		{
-			// Verify password
-			std::string passHash = Utils::hashPassword(password);
-			if (it->second.passwordHash == passHash)
-			{
-				// Authentication successful
-				playerId = it->second.playerId;
-				authData = it->second; // Copy the auth data
-				success = true;
-				response = "Authentication successful";
+		        // Check if too many failed attempts
+		        if (player.failedAuthAttempts >= MAX_PASSWORD_ATTEMPTS)
+		        {
+			        sendAuthResponse(peer, false, "Too many failed attempts. Please reconnect.");
+			        logger.error("Too many auth attempts from " + player.ipAddress);
 
-				// Update player data
-				it->second.lastLoginTime = std::time(nullptr);
-				it->second.lastIpAddress = player.ipAddress;
-				it->second.loginCount++;
+			        // Schedule peer disconnect after delay
+			        threadManager.scheduleTask(
+			                [this, peerCopy = peer]()
+			                {
+				                std::this_thread::sleep_for(std::chrono::seconds(1));
+				                enet_peer_disconnect(peerCopy, 0);
+			                });
 
-				logger.info("Player authenticated: " + username + " (ID: " + std::to_string(playerId) + ")");
-			}
-			else
-			{
-				// Wrong password
-				success = false;
-				response = "Invalid password";
+			        return;
+		        }
 
-				// Update the failed attempts in the stored player
-				std::scoped_lock<std::mutex> playerLock(playersMutex);
-				auto playerIt = players.find(peerKey);
-				if (playerIt != players.end())
-				{
-					playerIt->second.failedAuthAttempts++;
-				}
+		        // Reset variables for authentication check
+		        bool success = false;
+		        std::string response;
+		        AuthData authData;
 
-				stats.authFailures++;
-				logger.error("Authentication failed for " + username + ": Invalid password");
-			}
-		}
-		else
-		{
-			// User not found
-			success = false;
-			response = "User not found. Use /register to create an account.";
+		        // Authenticate player - this is already within the resource task so no mutex needed
+		        auto authIt = authenticatedPlayers.find(username);
+		        if (authIt != authenticatedPlayers.end())
+		        {
+			        // Verify password
+			        std::string passHash = Utils::hashPassword(password);
+			        if (authIt->second.passwordHash == passHash)
+			        {
+				        // Authentication successful
+				        playerId = authIt->second.playerId;
+				        authData = authIt->second; // Copy the auth data
+				        success = true;
+				        response = "Authentication successful";
 
-			// Update the failed attempts in the stored player
-			std::scoped_lock<std::mutex> playerLock(playersMutex);
-			auto playerIt = players.find(peerKey);
-			if (playerIt != players.end())
-			{
-				playerIt->second.failedAuthAttempts++;
-			}
+				        // Update player data
+				        authIt->second.lastLoginTime = std::time(nullptr);
+				        authIt->second.lastIpAddress = player.ipAddress;
+				        authIt->second.loginCount++;
 
-			logger.error("Authentication failed: User not found: " + username);
-		}
-	}
+				        logger.info("Player authenticated: " + username + " (ID: " + std::to_string(playerId) + ")");
+			        }
+			        else
+			        {
+				        // Wrong password
+				        success = false;
+				        response = "Invalid password";
 
-	// Failed authentication - send response and return
-	if (!success)
-	{
-		sendAuthResponse(peer, false, response);
-		return;
-	}
+				        // Update the failed attempts in the stored player
+				        auto playerIt = players.find(peerKey);
+				        if (playerIt != players.end())
+				        {
+					        playerIt->second.failedAuthAttempts++;
+				        }
 
-	// Check if player ID is already in use (multiple connections)
-	bool alreadyLoggedIn = false;
-	{
-		std::scoped_lock<std::mutex> lock(playersMutex);
-		alreadyLoggedIn = players.find(playerId) != players.end();
-	}
+				        stats.authFailures++;
+				        logger.error("Authentication failed for " + username + ": Invalid password");
+			        }
+		        }
+		        else
+		        {
+			        // User not found
+			        success = false;
+			        response = "User not found. Use /register to create an account.";
 
-	if (alreadyLoggedIn)
-	{
-		sendAuthResponse(peer, false, "Account already logged in");
-		logger.error("Authentication failed: Account already logged in: " + username);
-		return;
-	}
+			        // Update the failed attempts in the stored player
+			        auto playerIt = players.find(peerKey);
+			        if (playerIt != players.end())
+			        {
+				        playerIt->second.failedAuthAttempts++;
+			        }
 
-	// Update the player object with authenticated info
-	{
-		std::scoped_lock<std::mutex> pLock(playersMutex);
-		std::scoped_lock<std::mutex> peerLock(peerDataMutex);
+			        logger.error("Authentication failed: User not found: " + username);
+		        }
 
-		// Create a new player entry
-		Player authenticatedPlayer;
-		authenticatedPlayer.id = playerId;
-		authenticatedPlayer.name = username;
-		authenticatedPlayer.position = authData.lastPosition;
-		authenticatedPlayer.lastValidPosition = authData.lastPosition;
-		authenticatedPlayer.peer = peer;
-		authenticatedPlayer.lastUpdateTime = Utils::getCurrentTimeMs();
-		authenticatedPlayer.lastPingTime = Utils::getCurrentTimeMs();
-		authenticatedPlayer.connectionStartTime = player.connectionStartTime;
-		authenticatedPlayer.failedAuthAttempts = 0;
-		authenticatedPlayer.totalBytesReceived = player.totalBytesReceived;
-		authenticatedPlayer.totalBytesSent = player.totalBytesSent;
-		authenticatedPlayer.pingMs = player.pingMs;
-		authenticatedPlayer.isAuthenticated = true;
-		authenticatedPlayer.isAdmin = authData.isAdmin;
-		authenticatedPlayer.ipAddress = player.ipAddress;
+		        // Failed authentication - send response and return
+		        if (!success)
+		        {
+			        sendAuthResponse(peer, false, response);
+			        return;
+		        }
 
-		// Add new player entry before removing old one
-		players[playerId] = authenticatedPlayer;
+		        // Check if player ID is already in use (multiple connections)
+		        bool alreadyLoggedIn = players.find(playerId) != players.end();
 
-		// Now it's safe to remove the old player entry
-		players.erase(peerKey);
+		        if (alreadyLoggedIn)
+		        {
+			        sendAuthResponse(peer, false, "Account already logged in");
+			        logger.error("Authentication failed: Account already logged in: " + username);
+			        return;
+		        }
 
-		// Update peer data
-		uint32_t* ptrPlayerId = reinterpret_cast<uint32_t*>(peer->data);
-		if (ptrPlayerId != nullptr)
-		{
-			*ptrPlayerId = playerId;
-		}
-		else
-		{
-			peer->data = reinterpret_cast<void*>(new uint32_t(playerId));
-		}
+		        // Create a new player entry
+		        Player authenticatedPlayer;
+		        authenticatedPlayer.id = playerId;
+		        authenticatedPlayer.name = username;
+		        authenticatedPlayer.position = authData.lastPosition;
+		        authenticatedPlayer.lastValidPosition = authData.lastPosition;
+		        authenticatedPlayer.peer = peer;
+		        authenticatedPlayer.lastUpdateTime = Utils::getCurrentTimeMs();
+				authenticatedPlayer.connectionStartTime = player.connectionStartTime;
+		        authenticatedPlayer.failedAuthAttempts = 0;
+		        authenticatedPlayer.totalBytesReceived = player.totalBytesReceived;
+		        authenticatedPlayer.totalBytesSent = player.totalBytesSent;
+		        authenticatedPlayer.pingMs = player.pingMs;
+		        authenticatedPlayer.isAuthenticated = true;
+		        authenticatedPlayer.isAdmin = authData.isAdmin;
+		        authenticatedPlayer.ipAddress = player.ipAddress;
 
-		// Add to spatial grid
-		spatialGrid.addEntity(playerId, authenticatedPlayer.position);
+		        // Add new player entry before removing old one
+		        players[playerId] = authenticatedPlayer;
 
-		logger.info("Player " + username + " (ID: " + std::to_string(playerId) + ") logged in from " + player.ipAddress);
-	}
+		        // Now it's safe to remove the old player entry
+		        players.erase(peerKey);
 
-	// Send authentication response
-	sendAuthResponse(peer, true, std::to_string(playerId));
+		        // Update peer data
+		        uint32_t* ptrPlayerId = reinterpret_cast<uint32_t*>(peer->data);
+		        if (ptrPlayerId != nullptr)
+		        {
+			        *ptrPlayerId = playerId;
+		        }
+		        else
+		        {
+			        peer->data = reinterpret_cast<void*>(new uint32_t(playerId));
+		        }
 
-	// Send welcome message
-	sendSystemMessage(playerId, "Welcome back, " + username + "!");
+		        // Add to spatial grid
+		        spatialGrid.addEntity(playerId, authenticatedPlayer.position);
 
-	// Broadcast join message
-	broadcastSystemMessage(username + " has joined the game");
+		        logger.info("Player " + username + " (ID: " + std::to_string(playerId) + ") logged in from " + player.ipAddress);
 
-	// Plugin loggedin event
-	pluginManager->dispatchPlayerLogin(players[playerId]);
+		        // Need to capture these for use outside this task
+		        uint32_t finalPlayerId = playerId;
+		        std::string finalUsername = username;
+
+		        // Exit the resource critical section before doing communications
+		        // We'll capture the values we need and schedule new tasks
+
+		        // Send authentication response
+		        sendAuthResponse(peer, true, std::to_string(finalPlayerId));
+
+		        // Send welcome message - scheduling as a separate task
+		        threadManager.scheduleTask([this, finalPlayerId, finalUsername]() { sendSystemMessage(finalPlayerId, "Welcome back, " + finalUsername + "!"); });
+
+		        // Broadcast join message - scheduling as a separate task
+		        threadManager.scheduleTask([this, finalUsername]() { broadcastSystemMessage(finalUsername + " has joined the game"); });
+
+		        // Plugin loggedin event - scheduling as a separate task
+		        // that needs the final player object
+		        threadManager.scheduleResourceTask({ GameResources::PlayersId, GameResources::PluginsId },
+		                [this, finalPlayerId]()
+		                {
+			                auto it = players.find(finalPlayerId);
+			                if (it != players.end())
+			                {
+				                pluginManager->dispatchPlayerLogin(it->second);
+			                }
+		                });
+	        });
 }
 
 // Handle player registration
-void GameServer::handleRegistration(Player& player, const std::string& username, const std::string& password)
+void GameServer::handleRegistration(const Player& player, const std::string& username, const std::string& password)
 {
-	// Validate username and password
+	// Validate credentials outside resource locks
 	if (username.length() < 3 || username.length() > 20)
 	{
 		sendSystemMessage(player, "Username must be between 3 and 20 characters");
@@ -1112,286 +1222,340 @@ void GameServer::handleRegistration(Player& player, const std::string& username,
 		return;
 	}
 
-	bool success = false;
-	std::string response;
-	uint32_t newPlayerId = 0;
+	// Now access resources for registration
+	threadManager.scheduleResourceTask(
+	        {
+	                GameResources::AuthId,       // Need access to authenticated players map
+	                GameResources::PlayersId,    // Need access to players map
+	                GameResources::PeerDataId,   // Need access to peer->data
+	                GameResources::SpatialGridId // Need access to spatial grid
+	        },
+	        [this, player, username, password]()
+	        {
+		        bool success = false;
+		        std::string response;
+		        uint32_t newPlayerId = 0;
 
-	// Register new player
-	{
-		std::scoped_lock<std::mutex> lock(authMutex);
+		        // Check if username already exists
+		        if (authenticatedPlayers.find(username) != authenticatedPlayers.end())
+		        {
+			        success = false;
+			        response = "Username already exists";
+			        logger.error("Registration failed: Username already exists: " + username);
+		        }
+		        else
+		        {
+			        // Create new player
+			        newPlayerId = nextPlayerId++;
 
-		// Check if username already exists
-		if (authenticatedPlayers.find(username) != authenticatedPlayers.end())
-		{
-			success = false;
-			response = "Username already exists";
-			logger.error("Registration failed: Username already exists: " + username);
-		}
-		else
-		{
-			// Create new player
-			newPlayerId = nextPlayerId++;
+			        AuthData newPlayer;
+			        newPlayer.username = username;
+			        newPlayer.passwordHash = Utils::hashPassword(password);
+			        newPlayer.playerId = newPlayerId;
+			        newPlayer.lastLoginTime = std::time(nullptr);
+			        newPlayer.registrationTime = std::time(nullptr);
+			        newPlayer.lastPosition = config.spawnPosition;
+			        newPlayer.lastIpAddress = player.ipAddress;
+			        newPlayer.loginCount = 1;
+			        newPlayer.isAdmin = false;
 
-			AuthData newPlayer;
-			newPlayer.username = username;
-			newPlayer.passwordHash = Utils::hashPassword(password);
-			newPlayer.playerId = newPlayerId;
-			newPlayer.lastLoginTime = std::time(nullptr);
-			newPlayer.registrationTime = std::time(nullptr);
-			newPlayer.lastPosition = config.spawnPosition;
-			newPlayer.lastIpAddress = player.ipAddress;
-			newPlayer.loginCount = 1;
-			newPlayer.isAdmin = false;
+			        authenticatedPlayers[username] = newPlayer;
 
-			authenticatedPlayers[username] = newPlayer;
+			        success = true;
+			        response = "Registration successful";
+			        logger.info("New player registered: " + username + " (ID: " + std::to_string(newPlayerId) + ")");
+		        }
 
-			success = true;
-			response = "Registration successful";
-			logger.info("New player registered: " + username + " (ID: " + std::to_string(newPlayerId) + ")");
-		}
-	}
+		        if (success)
+		        {
+			        uint32_t oldKey = player.id == 0 ? reinterpret_cast<uintptr_t>(player.peer) : player.id;
 
-	if (success)
-	{
-		uint32_t oldKey = player.id == 0 ? reinterpret_cast<uintptr_t>(player.peer) : player.id;
+			        // Save auth data immediately - schedule separately to avoid deadlocks
+			        threadManager.scheduleResourceTask({ GameResources::AuthId, GameResources::DatabaseId }, [this]() { saveAuthData(); });
 
-		// Save auth data immediately after registration
-		saveAuthData();
+			        // Create a new player entry
+			        Player registeredPlayer;
+			        registeredPlayer.id = newPlayerId;
+			        registeredPlayer.name = username;
+			        registeredPlayer.position = config.spawnPosition;
+			        registeredPlayer.lastValidPosition = config.spawnPosition;
+			        registeredPlayer.peer = player.peer;
+			        registeredPlayer.lastUpdateTime = Utils::getCurrentTimeMs();
+			        registeredPlayer.connectionStartTime = player.connectionStartTime;
+					registeredPlayer.failedAuthAttempts = 0;
+			        registeredPlayer.totalBytesReceived = player.totalBytesReceived;
+			        registeredPlayer.totalBytesSent = player.totalBytesSent;
+			        registeredPlayer.pingMs = player.pingMs;
+			        registeredPlayer.isAuthenticated = true;
+			        registeredPlayer.isAdmin = false;
+			        registeredPlayer.ipAddress = player.ipAddress;
 
-		// Update the player object with registered info
-		{
-			std::scoped_lock<std::mutex> pLock(playersMutex);
+			        // Add new player entry
+			        players[newPlayerId] = registeredPlayer;
 
-			// Create a new player entry
-			Player registeredPlayer;
-			registeredPlayer.id = newPlayerId;
-			registeredPlayer.name = username;
-			registeredPlayer.position = config.spawnPosition;
-			registeredPlayer.lastValidPosition = config.spawnPosition;
-			registeredPlayer.peer = player.peer;
-			registeredPlayer.lastUpdateTime = Utils::getCurrentTimeMs();
-			registeredPlayer.lastPingTime = Utils::getCurrentTimeMs();
-			registeredPlayer.connectionStartTime = player.connectionStartTime;
-			registeredPlayer.failedAuthAttempts = 0;
-			registeredPlayer.totalBytesReceived = player.totalBytesReceived;
-			registeredPlayer.totalBytesSent = player.totalBytesSent;
-			registeredPlayer.pingMs = player.pingMs;
-			registeredPlayer.isAuthenticated = true;
-			registeredPlayer.isAdmin = false;
-			registeredPlayer.ipAddress = player.ipAddress;
+			        // Update peer data
+			        uint32_t* ptrPlayerId = reinterpret_cast<uint32_t*>(player.peer->data);
+			        if (ptrPlayerId != nullptr)
+			        {
+				        *ptrPlayerId = newPlayerId;
+			        }
+			        else
+			        {
+				        player.peer->data = reinterpret_cast<void*>(new uint32_t(newPlayerId));
+			        }
 
-			// Add new player entry
-			players[newPlayerId] = registeredPlayer;
+			        // Add to spatial grid
+			        spatialGrid.addEntity(newPlayerId, registeredPlayer.position);
 
-			// Update peer data
-			uint32_t* ptrPlayerId = reinterpret_cast<uint32_t*>(player.peer->data);
-			if (ptrPlayerId != nullptr)
-			{
-				*ptrPlayerId = newPlayerId;
-			}
-			else
-			{
-				player.peer->data = reinterpret_cast<void*>(new uint32_t(newPlayerId));
-			}
+			        // Store these for use in subsequent messages
+			        ENetPeer* playerPeer = player.peer;
 
-			// Add to spatial grid
-			spatialGrid.addEntity(newPlayerId, registeredPlayer.position);
-		}
+			        // Send registration response
+			        sendAuthResponse(playerPeer, true, std::to_string(newPlayerId));
 
-		// Send registration response
-		sendAuthResponse(player.peer, true, std::to_string(newPlayerId));
+			        // Send welcome message - schedule as a separate task
+			        threadManager.scheduleTask([this, newPlayerId, username]() { sendSystemMessage(newPlayerId, "Welcome to the game, " + username + "!"); });
 
-		// Send welcome message
-		sendSystemMessage(newPlayerId, "Welcome to the game, " + username + "!");
+			        // Broadcast join message - schedule as a separate task
+			        threadManager.scheduleTask([this, username]() { broadcastSystemMessage(username + " has joined the game for the first time!"); });
 
-		// Broadcast join message
-		broadcastSystemMessage(username + " has joined the game for the first time!");
-
-		// Remove old player entry
-		players.erase(oldKey);
-	}
-	else
-	{
-		sendSystemMessage(player, "Registration failed: " + response);
-	}
+			        // Remove old player entry
+			        players.erase(oldKey);
+		        }
+		        else
+		        {
+			        sendSystemMessage(player, "Registration failed: " + response);
+		        }
+	        });
 }
 
 void GameServer::syncPlayerStats()
 {
-	std::scoped_lock<std::mutex> statsLock(peerStatsMutex);
-	std::scoped_lock<std::mutex> playersLock(playersMutex);
+	// Use a resource task that requires access to both the players map and peer stats
+	threadManager.scheduleResourceTask({ GameResources::PlayersId, GameResources::PeerStatsId },
+	        [this]()
+	        {
+		        // For each player, copy stats from the lightweight objects
+		        for (auto& playerPair: players)
+		        {
+			        Player& player = playerPair.second;
+			        if (player.peer != nullptr)
+			        {
+				        uintptr_t peerKey = reinterpret_cast<uintptr_t>(player.peer);
+				        auto statsIt = peerStats.find(peerKey);
+				        if (statsIt != peerStats.end())
+				        {
+					        player.totalBytesSent = statsIt->second.totalBytesSent.load();
+					        player.totalBytesReceived = statsIt->second.totalBytesReceived.load();
+				        }
+			        }
+		        }
 
-	// For each player, copy stats from the lightweight objects
-	for (auto& playerPair: players)
-	{
-		Player& player = playerPair.second;
-		if (player.peer != nullptr)
-		{
-			uintptr_t peerKey = reinterpret_cast<uintptr_t>(player.peer);
-			auto statsIt = peerStats.find(peerKey);
-			if (statsIt != peerStats.end())
-			{
-				player.totalBytesSent = statsIt->second.totalBytesSent.load();
-				player.totalBytesReceived = statsIt->second.totalBytesReceived.load();
-			}
-		}
-	}
+		        // Clean up stats for disconnected peers (optional)
+		        std::vector<uintptr_t> keysToRemove;
+		        for (auto& statsPair: peerStats)
+		        {
+			        bool found = false;
+			        for (auto& playerPair: players)
+			        {
+				        if (playerPair.second.peer != nullptr && reinterpret_cast<uintptr_t>(playerPair.second.peer) == statsPair.first)
+				        {
+					        found = true;
+					        break;
+				        }
+			        }
+			        if (!found)
+			        {
+				        keysToRemove.push_back(statsPair.first);
+			        }
+		        }
 
-	// Clean up stats for disconnected peers (optional)
-	std::vector<uintptr_t> keysToRemove;
-	for (auto& statsPair: peerStats)
-	{
-		bool found = false;
-		for (auto& playerPair: players)
-		{
-			if (playerPair.second.peer != nullptr && reinterpret_cast<uintptr_t>(playerPair.second.peer) == statsPair.first)
-			{
-				found = true;
-				break;
-			}
-		}
-		if (!found)
-		{
-			keysToRemove.push_back(statsPair.first);
-		}
-	}
-
-	for (uintptr_t key: keysToRemove)
-	{
-		peerStats.erase(key);
-	}
+		        for (uintptr_t key: keysToRemove)
+		        {
+			        peerStats.erase(key);
+		        }
+	        });
 }
 
-void GameServer::handleDeltaPositionUpdate(Player& player, const std::string& deltaData)
+void GameServer::handleDeltaPositionUpdate(uint32_t playerId, const std::string& deltaData)
 {
-	try
-	{
-		// Get current time to track when this update was received
-		uint32_t currentTime = Utils::getCurrentTimeMs();
+	// Use a resource task to safely access and modify the player in the map
+	threadManager.scheduleResourceTask({ GameResources::PlayersId, GameResources::SpatialGridId },
+	        [this, playerId, deltaData]()
+	        {
+		        auto playerIt = players.find(playerId);
+		        if (playerIt == players.end())
+		        {
+			        logger.error("Player not found for position update: " + std::to_string(playerId));
+			        return;
+		        }
 
-		// Start with the current position
-		Position newPosition = player.position;
+		        Player& player = playerIt->second;
 
-		// Parse the delta updates (format: "x12.34,y56.78,z90.12")
-		auto parts = Utils::splitString(deltaData, ',');
-		for (const auto& part: parts)
-		{
-			if (part.empty())
-				continue;
+		        try
+		        {
+			        // Get current time to track when this update was received
+			        uint32_t currentTime = Utils::getCurrentTimeMs();
 
-			char axis = part[0];
-			float value = std::stof(part.substr(1));
+			        // Start with the current position
+			        Position newPosition = player.position;
 
-			// Update the corresponding coordinate
-			switch (axis)
-			{
-				case 'x':
-					newPosition.x = value;
-					break;
-				case 'y':
-					newPosition.y = value;
-					break;
-				case 'z':
-					newPosition.z = value;
-					break;
-				default:
-					logger.error("Invalid axis in delta position update: " + std::string(1, axis));
-					continue;
-			}
-		}
+			        // Parse the delta updates (format: "x12.34,y56.78,z90.12")
+			        auto parts = Utils::splitString(deltaData, ',');
+			        for (const auto& part: parts)
+			        {
+				        if (part.empty())
+					        continue;
 
-		// Validate movement if enabled
-		if (config.enableMovementValidation)
-		{
-			Position oldPosition = player.position;
-			float distance = oldPosition.distanceTo(newPosition);
+				        char axis = part[0];
+				        float value = std::stof(part.substr(1));
 
-			// Calculate elapsed time since last position update (in seconds)
-			float elapsedTime = (currentTime - player.lastPositionUpdateTime) / 1000.0f;
+				        // Update the corresponding coordinate
+				        switch (axis)
+				        {
+					        case 'x':
+						        newPosition.x = value;
+						        break;
+					        case 'y':
+						        newPosition.y = value;
+						        break;
+					        case 'z':
+						        newPosition.z = value;
+						        break;
+					        default:
+						        logger.error("Invalid axis in delta position update: " + std::string(1, axis));
+						        continue;
+				        }
+			        }
 
-			// Set a minimum elapsed time to avoid division by zero
-			// and to handle the first position update
-			if (elapsedTime < 0.01f)
-				elapsedTime = 0.01f;
+			        // Validate movement if enabled
+			        if (config.enableMovementValidation)
+			        {
+				        Position oldPosition = player.position;
+				        float distance = oldPosition.distanceTo(newPosition);
 
-			// Calculate the player's current speed (units per second)
-			float currentSpeed = distance / elapsedTime;
+				        // Calculate elapsed time since last position update (in seconds)
+				        float elapsedTime = (currentTime - player.lastPositionUpdateTime) / 1000.0f;
 
-			// Check if speed is within allowed movement speed (with a small margin for error)
-			// Add a 20% tolerance to account for network jitter
-			float speedLimit = config.maxMovementSpeed * 1.2f;
+				        // Set a minimum elapsed time to avoid division by zero
+				        // and to handle the first position update
+				        if (elapsedTime < 0.01f)
+					        elapsedTime = 0.01f;
 
-			if (currentSpeed > speedLimit && distance > 0.5f)
-			{ // Only check if moved significantly
-				logger.debug("Player " + player.name + " moved too fast: " + std::to_string(currentSpeed) + " units/sec (limit: " + std::to_string(speedLimit) + "), distance: " + std::to_string(distance) + " in " + std::to_string(elapsedTime) + " seconds");
+				        // Calculate the player's current speed (units per second)
+				        float currentSpeed = distance / elapsedTime;
 
-				// Reject movement and teleport back to last valid position
-				sendTeleport(player, player.lastValidPosition);
-				return;
-			}
+				        // Check if speed is within allowed movement speed (with a small margin for error)
+				        // Add a 20% tolerance to account for network jitter
+				        float speedLimit = config.maxMovementSpeed * 1.2f;
 
-			// Movement is valid, update last valid position
-			player.lastValidPosition = newPosition;
-		}
+				        if (currentSpeed > speedLimit && distance > 0.5f)
+				        { // Only check if moved significantly
+					        logger.debug("Player " + player.name + " moved too fast: " + std::to_string(currentSpeed) + " units/sec (limit: " + std::to_string(speedLimit) + "), distance: " + std::to_string(distance) + " in " + std::to_string(elapsedTime) + " seconds");
 
-		// Update player position and timestamp
-		Position oldPosition = player.position;
-		player.position = newPosition;
-		player.lastPositionUpdateTime = currentTime;
-		pluginManager->dispatchPlayerMove(player, oldPosition, player.position);
+					        // Reject movement and teleport back to last valid position
+					        sendTeleport(player, player.lastValidPosition);
+					        return;
+				        }
 
-		// Update in spatial grid
-		spatialGrid.updateEntity(player.id, oldPosition, newPosition);
-	}
-	catch (const std::exception& e)
-	{
-		logger.error("Error parsing delta position update from " + player.name + ": " + e.what());
-	}
+				        // Movement is valid, update last valid position
+				        player.lastValidPosition = newPosition;
+			        }
+
+			        // Update player position and timestamp
+			        Position oldPosition = player.position;
+			        player.position = newPosition;
+			        player.lastPositionUpdateTime = currentTime;
+			        pluginManager->dispatchPlayerMove(player, oldPosition, player.position);
+
+			        // Update in spatial grid
+			        spatialGrid.updateEntity(player.id, oldPosition, newPosition);
+		        }
+		        catch (const std::exception& e)
+		        {
+			        logger.error("Error parsing delta position update from " + player.name + ": " + e.what());
+		        }
+	        });
 }
 
 // Handle sending position to client
-void GameServer::handleSendPosition(Player& player)
+void GameServer::handleSendPosition(uint32_t playerId)
 {
-	try
-	{
-		// Get current time
-		uint32_t currentTime = Utils::getCurrentTimeMs();
+	// Schedule a resource task that requires Players and SpatialGrid
+	threadManager.scheduleResourceTask({ GameResources::PlayersId, GameResources::SpatialGridId },
+	        [this, playerId]()
+	        {
+		        // Find the player in the map
+		        auto playerIt = players.find(playerId);
+		        if (playerIt == players.end())
+		        {
+			        logger.error("Player not found for position update: " + std::to_string(playerId));
+			        return;
+		        }
 
-		// Create position string in the format "x12.34,y56.78,z90.12"
-		std::string positionString = "x" + std::to_string(player.position.x) + "," + "y" + std::to_string(player.position.y) + "," + "z" + std::to_string(player.position.z);
+		        Player& player = playerIt->second;
 
-		// Create a position update packet using the existing sendPacket method
-		std::string positionPacket = "POSITION:" + positionString;
+		        try
+		        {
+			        // Get current time
+			        uint32_t currentTime = Utils::getCurrentTimeMs();
 
-		// Send the position data to the client
-		sendPacket(player.peer, positionPacket, false); // Using unreliable packets for position updates
+			        // Create position string in the format "x12.34,y56.78,z90.12"
+			        std::string positionString = "x" + std::to_string(player.position.x) + "," + "y" + std::to_string(player.position.y) + "," + "z" + std::to_string(player.position.z);
 
-		// Log the position update (optional)
-		logger.debug("Sent position update to " + player.name + ": " + positionString);
+			        // Create a position update packet using the existing sendPacket method
+			        std::string positionPacket = "POSITION:" + positionString;
 
-		// Update timestamp of when we last sent position
-		player.lastPositionUpdateTime = currentTime; // Using the existing timestamp field
+			        // Send the position data to the client
+			        sendPacket(player.peer, positionPacket, false); // Using unreliable packets for position updates
 
-		// Not sure if I should send it to ever player just yet
-		// std::set<uint32_t> nearbyPlayers = spatialGrid.getNearbyEntities(player.position, config.interestRadius);
-		// for (uint32_t nearbyId : nearbyPlayers) {
-		//     // Skip self
-		//     if (nearbyId == player.id) continue;
-		//
-		//     auto it = players.find(nearbyId);
-		//     if (it != players.end()) {
-		//         sendPacket(it->second.peer, positionPacket, false);
-		//     }
-		// }
-	}
-	catch (const std::exception& e)
-	{
-		logger.error("Error sending position update to " + player.name + ": " + e.what());
-	}
+			        // Log the position update (optional)
+			        logger.debug("Sent position update to " + player.name + ": " + positionString);
+
+			        // Update timestamp of when we last sent position - now works because we have a non-const reference
+			        player.lastPositionUpdateTime = currentTime;
+
+			        // Send the player's position to nearby players
+			        std::set<uint32_t> nearbyPlayers = spatialGrid.getNearbyEntities(player.position, config.interestRadius);
+
+			        // Collect peers to send to
+			        std::vector<ENetPeer*> nearbyPeers;
+			        for (uint32_t nearbyId: nearbyPlayers)
+			        {
+				        // Skip self
+				        if (nearbyId == player.id)
+					        continue;
+
+				        auto it = players.find(nearbyId);
+				        if (it != players.end() && it->second.peer != nullptr)
+				        {
+					        nearbyPeers.push_back(it->second.peer);
+				        }
+			        }
+
+			        // Schedule packet sending as a separate task to avoid holding resources
+			        if (!nearbyPeers.empty())
+			        {
+				        threadManager.scheduleTask(
+				                [this, nearbyPeers, positionPacket]()
+				                {
+					                for (ENetPeer* peer: nearbyPeers)
+					                {
+						                sendPacket(peer, positionPacket, false);
+					                }
+				                });
+			        }
+		        }
+		        catch (const std::exception& e)
+		        {
+			        logger.error("Error sending position update to " + player.name + ": " + e.what());
+		        }
+	        });
 }
 
+
 // Handle chat message
-void GameServer::handleChatMessage(Player& player, const std::string& message)
+void GameServer::handleChatMessage(const Player& player, const std::string& message)
 {
 	// Ignore empty messages
 	if (message.empty())
@@ -1406,41 +1570,41 @@ void GameServer::handleChatMessage(Player& player, const std::string& message)
 
 	logger.debug("Chat from " + player.name + ": " + message);
 
-	// Store in chat history
-	{
-		std::scoped_lock<std::mutex> lock(chatMutex);
+	// Use resource tasks for chat history and broadcasting
+	threadManager.scheduleResourceTask({ GameResources::ChatId },
+	        [this, playerName = player.name, message]()
+	        {
+		        // Store in chat history
+		        ChatMessage chatMsg;
+		        chatMsg.sender = playerName;
+		        chatMsg.content = message;
+		        chatMsg.timestamp = Utils::getCurrentTimeMs();
+		        chatMsg.isGlobal = true;
+		        chatMsg.isSystem = false;
+		        chatMsg.range = 0;
 
-		ChatMessage chatMsg;
-		chatMsg.sender = player.name;
-		chatMsg.content = message;
-		chatMsg.timestamp = Utils::getCurrentTimeMs();
-		chatMsg.isGlobal = true;
-		chatMsg.isSystem = false;
-		chatMsg.range = 0;
+		        chatHistory.push_back(chatMsg);
 
-		chatHistory.push_back(chatMsg);
+		        // Limit chat history size
+		        while (chatHistory.size() > MAX_CHAT_HISTORY)
+		        {
+			        chatHistory.pop_front();
+		        }
 
-		// Limit chat history size
-		while (chatHistory.size() > MAX_CHAT_HISTORY)
-		{
-			chatHistory.pop_front();
-		}
-	}
+		        // Update stats - atomic operation, no resource needed
+		        stats.chatMessagesSent++;
+	        });
 
-	// Broadcast to all players
-	broadcastChatMessage(player.name, message);
-
-	// Update stats
-	stats.chatMessagesSent++;
+	// Broadcast to all players - schedule separately to avoid holding Chat resource
+	threadManager.scheduleTask([this, playerName = player.name, message]() { broadcastChatMessage(playerName, message); });
 }
 
 // Handle ping message
-void GameServer::handlePingMessage(Player& player, const std::string& pingData)
+void GameServer::handlePingMessage(const Player& player, const std::string& pingData)
 {
 	try
 	{
 		uint32_t clientTime = std::stoul(pingData);
-		player.lastPingTime = Utils::getCurrentTimeMs();
 
 		// Send pong response
 		std::string pongMsg = "PONG:" + pingData;
@@ -1453,7 +1617,7 @@ void GameServer::handlePingMessage(Player& player, const std::string& pingData)
 }
 
 // Handle command message
-void GameServer::handleCommandMessage(Player& player, const std::string& commandStr)
+void GameServer::handleCommandMessage(const Player& player, const std::string& commandStr)
 {
 	logger.debug("Processing command: '" + commandStr + "'");
 
@@ -1507,23 +1671,18 @@ void GameServer::sendPacket(ENetPeer* peer, const std::string& message, bool rel
 		return;
 	}
 
-	// Update global stats
+	// Update global stats - atomic operation
 	stats.totalPacketsSent++;
 	stats.totalBytesSent += message.length();
 
-	// Update per-peer stats without accessing player objects
-	{
-		std::scoped_lock<std::mutex> lock(peerStatsMutex); // Much lighter lock
-		peerStats[reinterpret_cast<uintptr_t>(peer)].totalBytesSent += message.length();
-	}
-
-	// No player object access here at all
+	// Update per-peer stats - needs resource access
+	threadManager.scheduleResourceTask({ GameResources::PeerStatsId }, [this, peer, messageLength = message.length()]() { peerStats[reinterpret_cast<uintptr_t>(peer)].totalBytesSent += messageLength; });
 }
 
 // Send system message to player
-void GameServer::sendSystemMessage(Player& player, const std::string& message)
+void GameServer::sendSystemMessage(const Player& player, const std::string& message)
 {
-	logger.trace("Sending system message to" + player.name + ": " + message);
+	logger.trace("Sending system message to " + player.name + ": " + message);
 	std::string sysMsg = "SYSTEM:" + message;
 	sendPacket(player.peer, sysMsg, true);
 }
@@ -1531,17 +1690,23 @@ void GameServer::sendSystemMessage(Player& player, const std::string& message)
 // Send system message to player by ID
 void GameServer::sendSystemMessage(uint32_t playerId, const std::string& message)
 {
-	std::scoped_lock<std::mutex> lock(playersMutex);
+	threadManager.scheduleReadTask({ GameResources::PlayersId },
+	        [this, playerId, message]()
+	        {
+		        auto it = players.find(playerId);
+		        if (it != players.end())
+		        {
+			        // Use a const reference since we're only reading
+			        const Player& player = it->second;
 
-	auto it = players.find(playerId);
-	if (it != players.end())
-	{
-		sendSystemMessage(it->second, message);
-	}
+			        // Schedule the actual send in a separate task to avoid holding resources
+			        threadManager.scheduleTask([this, playerCopy = player, message]() { sendSystemMessage(playerCopy, message); });
+		        }
+	        });
 }
 
 // Send teleport command to player
-void GameServer::sendTeleport(Player& player, const Position& position)
+void GameServer::sendTeleport(const Player& player, const Position& position)
 {
 	std::string teleportMsg = "TELEPORT:" + std::to_string(position.x) + "," + std::to_string(position.y) + "," + std::to_string(position.z);
 	sendPacket(player.peer, teleportMsg, true);
@@ -1550,507 +1715,553 @@ void GameServer::sendTeleport(Player& player, const Position& position)
 // Broadcast world state to all players
 void GameServer::broadcastWorldState()
 {
-	std::scoped_lock<std::mutex> lock(playersMutex);
+	// Use resource task that requires Players and SpatialGrid
+	threadManager.scheduleResourceTask({ GameResources::PlayersId, GameResources::SpatialGridId },
+	        [this]()
+	        {
+		        for (auto& pair: players)
+		        {
+			        Player& player = pair.second;
 
-	for (auto& pair: players)
-	{
-		Player& player = pair.second;
+			        // Skip unauthenticated players
+			        if (!player.isAuthenticated)
+				        continue;
 
-		// Skip unauthenticated players
-		if (!player.isAuthenticated)
-			continue;
+			        // Prepare world state packet for this player
+			        std::string worldState = "WORLD_STATE:";
 
-		// Prepare world state packet for this player
-		std::string worldState = "WORLD_STATE:";
+			        // Get nearby entities
+			        std::set<uint32_t> visibleEntities;
+			        if (config.interestRadius > 0)
+			        {
+				        visibleEntities = spatialGrid.getNearbyEntities(player.position, config.interestRadius);
+			        }
+			        else
+			        {
+				        // No interest management, see all players
+				        for (const auto& otherPair: players)
+				        {
+					        if (otherPair.second.isAuthenticated)
+					        {
+						        visibleEntities.insert(otherPair.first);
+					        }
+				        }
+			        }
 
-		// Get nearby entities
-		std::set<uint32_t> visibleEntities;
-		if (config.interestRadius > 0)
-		{
-			visibleEntities = spatialGrid.getNearbyEntities(player.position, config.interestRadius);
-		}
-		else
-		{
-			// No interest management, see all players
-			for (const auto& otherPair: players)
-			{
-				if (otherPair.second.isAuthenticated)
-				{
-					visibleEntities.insert(otherPair.first);
-				}
-			}
-		}
+			        // Add all players within interest radius
+			        for (uint32_t entityId: visibleEntities)
+			        {
+				        // Skip self
+				        if (entityId == player.id)
+					        continue;
 
-		// Add all players within interest radius
-		for (uint32_t entityId: visibleEntities)
-		{
-			// Skip self
-			if (entityId == player.id)
-				continue;
+				        auto it = players.find(entityId);
+				        if (it != players.end() && it->second.isAuthenticated)
+				        {
+					        const Player& otherPlayer = it->second;
+					        worldState += std::to_string(otherPlayer.id) + "," + otherPlayer.name + "," + std::to_string(otherPlayer.position.x) + "," + std::to_string(otherPlayer.position.y) + "," + std::to_string(otherPlayer.position.z) + ";";
+				        }
+			        }
 
-			auto it = players.find(entityId);
-			if (it != players.end() && it->second.isAuthenticated)
-			{
-				const Player& otherPlayer = it->second;
+			        // Update player's visible set for next time
+			        player.visiblePlayers = visibleEntities;
 
-				worldState += std::to_string(otherPlayer.id) + "," + otherPlayer.name + "," + std::to_string(otherPlayer.position.x) + "," + std::to_string(otherPlayer.position.y) + "," + std::to_string(otherPlayer.position.z) + ";";
-			}
-		}
+			        // Get a local reference to the peer for sending
+			        ENetPeer* playerPeer = player.peer;
 
-		// Update player's visible set for next time
-		player.visiblePlayers = visibleEntities;
-
-		// Send world state (use unreliable packet for frequent updates)
-		sendPacket(player.peer, worldState, false);
-	}
+			        // Send world state (use unreliable packet for frequent updates)
+			        // Do this in a separate task to avoid holding resources during network operations
+			        threadManager.scheduleTask([this, playerPeer, worldState]() { sendPacket(playerPeer, worldState, false); });
+		        }
+	        });
 }
 
 // Check for timed out players
 void GameServer::checkTimeouts()
 {
-	std::scoped_lock<std::mutex> lock(playersMutex);
-	uint32_t currentTime = Utils::getCurrentTimeMs();
+	threadManager.scheduleResourceTask({ GameResources::PlayersId },
+	        [this]()
+	        {
+		        uint32_t currentTime = Utils::getCurrentTimeMs();
+		        std::vector<uint32_t> timeoutPlayers;
 
-	std::vector<uint32_t> timeoutPlayers;
-	for (const auto& pair: players)
-	{
-		// Skip unauthenticated players
-		if (!pair.second.isAuthenticated)
-			continue;
+		        // First pass: identify timed out players
+		        for (const auto& pair: players)
+		        {
+			        // Skip unauthenticated players
+			        if (!pair.second.isAuthenticated)
+				        continue;
 
-		if (currentTime - pair.second.lastUpdateTime > config.timeoutMs)
-		{
-			timeoutPlayers.push_back(pair.first);
-		}
-	}
+			        if (currentTime - pair.second.lastUpdateTime > config.timeoutMs)
+			        {
+				        timeoutPlayers.push_back(pair.first);
+			        }
+		        }
 
-	// Disconnect timed-out players
-	for (uint32_t id: timeoutPlayers)
-	{
-		auto it = players.find(id);
-		if (it != players.end())
-		{
-			logger.info("Player " + it->second.name + " (ID: " + std::to_string(id) + ") timed out");
+		        // Second pass: handle each timed-out player
+		        for (uint32_t id: timeoutPlayers)
+		        {
+			        auto it = players.find(id);
+			        if (it != players.end())
+			        {
+				        logger.info("Player " + it->second.name + " (ID: " + std::to_string(id) + ") timed out");
 
-			auto it = players.find(id);
-			if (it == players.end())
-				return;
+				        std::string username = it->second.name;
+				        Position lastPos = it->second.position;
+				        ENetPeer* playerPeer = it->second.peer;
 
-			std::string username = it->second.name;
-			Position lastPos = it->second.position;
+				        // Schedule saving player data as a separate task
+				        threadManager.scheduleResourceTask({ GameResources::AuthId, GameResources::DatabaseId }, [this, username, lastPos]() { savePlayerData(username, lastPos); });
 
-			// Save player data
-			savePlayerData(username, lastPos);
+				        // Schedule broadcasting timeout message as a separate task
+				        threadManager.scheduleTask([this, username]() { broadcastSystemMessage(username + " timed out"); });
 
-			// Broadcast timeout message
-			broadcastSystemMessage(it->second.name + " timed out");
+				        // Disconnect the player - do this in a separate task
+				        threadManager.scheduleTask([playerPeer]() { enet_peer_disconnect(playerPeer, 0); });
 
-			// Disconnect the player
-			enet_peer_disconnect(it->second.peer, 0);
-		}
-	}
+				        // Remove from players map
+				        players.erase(it);
+			        }
+		        }
+	        });
 }
 
 // Broadcast system message to all players
 void GameServer::broadcastSystemMessage(const std::string& message)
 {
-	//std::scoped_lock<std::mutex> lock(playersMutex);
+	// Schedule as a read task since we're not modifying player data
+	threadManager.scheduleReadTask({ GameResources::PlayersId },
+	        [this, message]()
+	        {
+		        logger.info("Broadcast: " + message);
 
-	logger.info("Broadcast: " + message);
+		        for (auto& pair: players)
+		        {
+			        if (pair.second.isAuthenticated)
+			        {
+				        sendSystemMessage(pair.second, message);
+			        }
+		        }
 
-	for (auto& pair: players)
-	{
-		if (pair.second.isAuthenticated)
-		{
-			sendSystemMessage(pair.second, message);
-		}
-	}
+		        // Add to chat history (needs write access to Chat)
+		        threadManager.scheduleResourceTask({ GameResources::ChatId },
+		                [this, message]()
+		                {
+			                ChatMessage chatMsg;
+			                chatMsg.sender = "Server";
+			                chatMsg.content = message;
+			                chatMsg.timestamp = Utils::getCurrentTimeMs();
+			                chatMsg.isGlobal = true;
+			                chatMsg.isSystem = true;
+			                chatMsg.range = 0;
 
-	// Add to chat history
-	{
-		std::scoped_lock<std::mutex> chatLock(chatMutex);
+			                chatHistory.push_back(chatMsg);
 
-		ChatMessage chatMsg;
-		chatMsg.sender = "Server";
-		chatMsg.content = message;
-		chatMsg.timestamp = Utils::getCurrentTimeMs();
-		chatMsg.isGlobal = true;
-		chatMsg.isSystem = true;
-		chatMsg.range = 0;
-
-		chatHistory.push_back(chatMsg);
-
-		// Limit chat history size
-		while (chatHistory.size() > MAX_CHAT_HISTORY)
-		{
-			chatHistory.pop_front();
-		}
-	}
+			                // Limit chat history size
+			                while (chatHistory.size() > MAX_CHAT_HISTORY)
+			                {
+				                chatHistory.pop_front();
+			                }
+		                });
+	        });
 }
 
 std::vector<std::string> GameServer::getOnlinePlayerNames()
 {
-	std::scoped_lock<std::mutex> lock(playersMutex);
-
-	std::vector<std::string> names;
-	for (const auto& pair: players)
-	{
-		if (pair.second.isAuthenticated)
-		{
-			names.push_back(pair.second.name);
-		}
-	}
-
-	return names;
+	// Schedule a read task and wait for the result
+	return threadManager
+	        .scheduleReadTaskWithResult({ GameResources::PlayersId },
+	                [this]() -> std::vector<std::string>
+	                {
+		                std::vector<std::string> names;
+		                for (const auto& pair: players)
+		                {
+			                if (pair.second.isAuthenticated)
+			                {
+				                names.push_back(pair.second.name);
+			                }
+		                }
+		                return names;
+	                })
+	        .get(); // Wait for the result
 }
 
 // Broadcast chat message to all players
 void GameServer::broadcastChatMessage(const std::string& sender, const std::string& message)
 {
-	std::scoped_lock<std::mutex> lock(playersMutex);
-
+	// Create the chat message outside the resource task (no resources needed)
 	std::string chatMsg = "CHAT:" + sender + ":" + message;
 
-	pluginManager->dispatchChatMessage(sender, message);
+	// Schedule a resource task that requires Players and Plugins resources
+	threadManager.scheduleResourceTask({ GameResources::PlayersId, GameResources::PluginsId },
+	        [this, sender, message, chatMsg]()
+	        {
+		        // Dispatch chat message to plugins
+		        pluginManager->dispatchChatMessage(sender, message);
 
-	for (auto& pair: players)
-	{
-		if (pair.second.isAuthenticated)
-		{
-			sendPacket(pair.second.peer, chatMsg, true);
-		}
-	}
+		        // Collect all authenticated players' peers
+		        std::vector<ENetPeer*> authenticatedPeers;
+
+		        for (auto& pair: players)
+		        {
+			        if (pair.second.isAuthenticated && pair.second.peer != nullptr)
+			        {
+				        authenticatedPeers.push_back(pair.second.peer);
+			        }
+		        }
+
+		        // Release resources before sending packets
+		        // Schedule a separate task for sending packets to avoid holding resources
+		        threadManager.scheduleTask(
+		                [this, authenticatedPeers, chatMsg]()
+		                {
+			                for (ENetPeer* peer: authenticatedPeers)
+			                {
+				                sendPacket(peer, chatMsg, true);
+			                }
+		                });
+	        });
 }
 
 // Updated function signature
 void GameServer::savePlayerData(const std::string& username, const Position& lastPos)
 {
-	// First update in-memory structure
-	bool foundInMemory = false;
-	uint32_t playerId = 0;
+	// Schedule a resource task that requires Auth and Database resources
+	threadManager.scheduleResourceTask({ GameResources::AuthId, GameResources::DatabaseId },
+	        [this, username, lastPos]()
+	        {
+		        // Update in-memory structure
+		        bool foundInMemory = false;
+		        uint32_t playerId = 0;
 
-	{
-		std::scoped_lock<std::mutex> aLock(authMutex);
-		auto authIt = authenticatedPlayers.find(username);
-		if (authIt != authenticatedPlayers.end())
-		{
-			// Save position in memory
-			authIt->second.lastPosition = lastPos;
-			playerId = authIt->second.playerId;
-			foundInMemory = true;
-			logger.debug("Updated in-memory position data for player " + username);
-		}
-	}
+		        auto authIt = authenticatedPlayers.find(username);
+		        if (authIt != authenticatedPlayers.end())
+		        {
+			        // Save position in memory
+			        authIt->second.lastPosition = lastPos;
+			        playerId = authIt->second.playerId;
+			        foundInMemory = true;
+			        logger.debug("Updated in-memory position data for player " + username);
+		        }
 
-	if (!foundInMemory)
-	{
-		logger.error("Failed to find player in memory: " + username);
-		return;
-	}
+		        if (!foundInMemory)
+		        {
+			        logger.error("Failed to find player in memory: " + username);
+			        return;
+		        }
 
-	// Save to database if enabled
-	if (config.useDatabase && foundInMemory)
-	{
-		if (dbManager.savePlayerPosition(playerId, lastPos))
-		{
-			logger.debug("Saved position data for player " + username + " to database");
-		}
-		else
-		{
-			logger.error("Failed to save position data to database for player " + username);
-		}
-	}
+		        // Save to database if enabled
+		        if (config.useDatabase && foundInMemory)
+		        {
+			        if (dbManager.savePlayerPosition(playerId, lastPos))
+			        {
+				        logger.debug("Saved position data for player " + username + " to database");
+			        }
+			        else
+			        {
+				        logger.error("Failed to save position data to database for player " + username);
+			        }
+		        }
+	        });
 }
 
 // Load authentication data from file
 void GameServer::loadAuthData()
 {
-	std::scoped_lock<std::mutex> lock(authMutex);
+	// Use a resource task with exclusive access to Auth resources
+	threadManager.scheduleResourceTask({ GameResources::AuthId, GameResources::DatabaseId },
+	        [this]()
+	        {
+		        logger.info("Loading player authentication data...");
 
-	logger.info("Loading player authentication data...");
+		        // Try to load from database if enabled
+		        if (config.useDatabase)
+		        {
+			        if (dbManager.loadAuthData(authenticatedPlayers, nextPlayerId))
+			        {
+				        logger.info("Successfully loaded " + std::to_string(authenticatedPlayers.size()) + " player accounts from database");
+				        return;
+			        }
+			        else
+			        {
+				        logger.error("Failed to load player data from database. Falling back to file.");
+				        // Fall through to file-based loading if database fails
+			        }
+		        }
 
-	// Try to load from database if enabled
-	if (config.useDatabase)
-	{
-		if (dbManager.loadAuthData(authenticatedPlayers, nextPlayerId))
-		{
-			logger.info("Successfully loaded " + std::to_string(authenticatedPlayers.size()) + " player accounts from database");
-			return;
-		}
-		else
-		{
-			logger.error("Failed to load player data from database. Falling back to file.");
-			// Fall through to file-based loading if database fails
-		}
-	}
+		        // Original file-based loading code (as fallback)
+		        std::ifstream file(AUTH_DB_FILE, std::ios::binary);
+		        if (!file.is_open())
+		        {
+			        logger.info("No existing auth file found, starting fresh");
+			        return;
+		        }
 
-	// Original file-based loading code (as fallback)
-	std::ifstream file(AUTH_DB_FILE, std::ios::binary);
-	if (!file.is_open())
-	{
-		logger.info("No existing auth file found, starting fresh");
-		return;
-	}
+		        try
+		        {
+			        // Read number of entries
+			        size_t numEntries;
+			        file.read(reinterpret_cast<char*>(&numEntries), sizeof(numEntries));
 
-	try
-	{
-		// Read number of entries
-		size_t numEntries;
-		file.read(reinterpret_cast<char*>(&numEntries), sizeof(numEntries));
+			        logger.info("Loading " + std::to_string(numEntries) + " player accounts...");
 
-		logger.info("Loading " + std::to_string(numEntries) + " player accounts...");
+			        uint32_t maxId = 0;
+			        authenticatedPlayers.clear();
 
-		uint32_t maxId = 0;
-		authenticatedPlayers.clear();
+			        // Read each entry
+			        for (size_t i = 0; i < numEntries; i++)
+			        {
+				        {
+					        AuthData auth;
 
-		// Read each entry
-		for (size_t i = 0; i < numEntries; i++)
-		{
-			AuthData auth;
+					        // Read username
+					        size_t usernameLength;
+					        if (!file.read(reinterpret_cast<char*>(&usernameLength), sizeof(usernameLength)))
+					        {
+						        throw std::runtime_error("Failed to read username length for entry " + std::to_string(i));
+					        }
 
-			// Read username
-			size_t usernameLength;
-			if (!file.read(reinterpret_cast<char*>(&usernameLength), sizeof(usernameLength)))
-			{
-				throw std::runtime_error("Failed to read username length for entry " + std::to_string(i));
-			}
+					        std::vector<char> usernameBuffer(usernameLength + 1, 0);
+					        if (!file.read(usernameBuffer.data(), usernameLength))
+					        {
+						        throw std::runtime_error("Failed to read username data for entry " + std::to_string(i));
+					        }
+					        auth.username = std::string(usernameBuffer.data(), usernameLength);
 
-			std::vector<char> usernameBuffer(usernameLength + 1, 0);
-			if (!file.read(usernameBuffer.data(), usernameLength))
-			{
-				throw std::runtime_error("Failed to read username data for entry " + std::to_string(i));
-			}
-			auth.username = std::string(usernameBuffer.data(), usernameLength);
+					        // Read password hash
+					        size_t passwordHashLength;
+					        if (!file.read(reinterpret_cast<char*>(&passwordHashLength), sizeof(passwordHashLength)))
+					        {
+						        throw std::runtime_error("Failed to read password hash length for " + auth.username);
+					        }
 
-			// Read password hash
-			size_t passwordHashLength;
-			if (!file.read(reinterpret_cast<char*>(&passwordHashLength), sizeof(passwordHashLength)))
-			{
-				throw std::runtime_error("Failed to read password hash length for " + auth.username);
-			}
+					        std::vector<char> passwordHashBuffer(passwordHashLength + 1, 0);
+					        if (!file.read(passwordHashBuffer.data(), passwordHashLength))
+					        {
+						        throw std::runtime_error("Failed to read password hash data for " + auth.username);
+					        }
+					        auth.passwordHash = std::string(passwordHashBuffer.data(), passwordHashLength);
 
-			std::vector<char> passwordHashBuffer(passwordHashLength + 1, 0);
-			if (!file.read(passwordHashBuffer.data(), passwordHashLength))
-			{
-				throw std::runtime_error("Failed to read password hash data for " + auth.username);
-			}
-			auth.passwordHash = std::string(passwordHashBuffer.data(), passwordHashLength);
+					        // Read player ID
+					        if (!file.read(reinterpret_cast<char*>(&auth.playerId), sizeof(auth.playerId)))
+					        {
+						        throw std::runtime_error("Failed to read player ID for " + auth.username);
+					        }
 
-			// Read player ID
-			if (!file.read(reinterpret_cast<char*>(&auth.playerId), sizeof(auth.playerId)))
-			{
-				throw std::runtime_error("Failed to read player ID for " + auth.username);
-			}
+					        // Read last login time
+					        if (!file.read(reinterpret_cast<char*>(&auth.lastLoginTime), sizeof(auth.lastLoginTime)))
+					        {
+						        throw std::runtime_error("Failed to read last login time for " + auth.username);
+					        }
 
-			// Read last login time
-			if (!file.read(reinterpret_cast<char*>(&auth.lastLoginTime), sizeof(auth.lastLoginTime)))
-			{
-				throw std::runtime_error("Failed to read last login time for " + auth.username);
-			}
+					        // Read registration time (with backwards compatibility)
+					        if (file.peek() != EOF)
+					        {
+						        if (!file.read(reinterpret_cast<char*>(&auth.registrationTime), sizeof(auth.registrationTime)))
+						        {
+							        auth.registrationTime = auth.lastLoginTime; // Default if not present
+						        }
+					        }
+					        else
+					        {
+						        auth.registrationTime = auth.lastLoginTime;
+					        }
 
-			// Read registration time (with backwards compatibility)
-			if (file.peek() != EOF)
-			{
-				if (!file.read(reinterpret_cast<char*>(&auth.registrationTime), sizeof(auth.registrationTime)))
-				{
-					auth.registrationTime = auth.lastLoginTime; // Default if not present
-				}
-			}
-			else
-			{
-				auth.registrationTime = auth.lastLoginTime;
-			}
+					        // Read last position
+					        if (file.peek() != EOF)
+					        {
+						        if (!file.read(reinterpret_cast<char*>(&auth.lastPosition), sizeof(auth.lastPosition)))
+						        {
+							        auth.lastPosition = config.spawnPosition; // Default if not present
+						        }
+					        }
+					        else
+					        {
+						        auth.lastPosition = config.spawnPosition;
+					        }
 
-			// Read last position
-			if (file.peek() != EOF)
-			{
-				if (!file.read(reinterpret_cast<char*>(&auth.lastPosition), sizeof(auth.lastPosition)))
-				{
-					auth.lastPosition = config.spawnPosition; // Default if not present
-				}
-			}
-			else
-			{
-				auth.lastPosition = config.spawnPosition;
-			}
+					        // Read last IP address (with backwards compatibility)
+					        if (file.peek() != EOF)
+					        {
+						        size_t ipLength;
+						        if (file.read(reinterpret_cast<char*>(&ipLength), sizeof(ipLength)))
+						        {
+							        std::vector<char> ipBuffer(ipLength + 1, 0);
+							        if (file.read(ipBuffer.data(), ipLength))
+							        {
+								        auth.lastIpAddress = std::string(ipBuffer.data(), ipLength);
+							        }
+							        else
+							        {
+								        auth.lastIpAddress = "";
+							        }
+						        }
+						        else
+						        {
+							        auth.lastIpAddress = "";
+						        }
+					        }
+					        else
+					        {
+						        auth.lastIpAddress = "";
+					        }
 
-			// Read last IP address (with backwards compatibility)
-			if (file.peek() != EOF)
-			{
-				size_t ipLength;
-				if (file.read(reinterpret_cast<char*>(&ipLength), sizeof(ipLength)))
-				{
-					std::vector<char> ipBuffer(ipLength + 1, 0);
-					if (file.read(ipBuffer.data(), ipLength))
-					{
-						auth.lastIpAddress = std::string(ipBuffer.data(), ipLength);
-					}
-					else
-					{
-						auth.lastIpAddress = "";
-					}
-				}
-				else
-				{
-					auth.lastIpAddress = "";
-				}
-			}
-			else
-			{
-				auth.lastIpAddress = "";
-			}
+					        // Read login count (with backwards compatibility)
+					        if (file.peek() != EOF)
+					        {
+						        if (!file.read(reinterpret_cast<char*>(&auth.loginCount), sizeof(auth.loginCount)))
+						        {
+							        auth.loginCount = 1; // Default if not present
+						        }
+					        }
+					        else
+					        {
+						        auth.loginCount = 1;
+					        }
 
-			// Read login count (with backwards compatibility)
-			if (file.peek() != EOF)
-			{
-				if (!file.read(reinterpret_cast<char*>(&auth.loginCount), sizeof(auth.loginCount)))
-				{
-					auth.loginCount = 1; // Default if not present
-				}
-			}
-			else
-			{
-				auth.loginCount = 1;
-			}
+					        // Read admin status (with backwards compatibility)
+					        if (file.peek() != EOF)
+					        {
+						        if (!file.read(reinterpret_cast<char*>(&auth.isAdmin), sizeof(auth.isAdmin)))
+						        {
+							        auth.isAdmin = false; // Default if not present
+						        }
+					        }
+					        else
+					        {
+						        auth.isAdmin = false;
+					        }
 
-			// Read admin status (with backwards compatibility)
-			if (file.peek() != EOF)
-			{
-				if (!file.read(reinterpret_cast<char*>(&auth.isAdmin), sizeof(auth.isAdmin)))
-				{
-					auth.isAdmin = false; // Default if not present
-				}
-			}
-			else
-			{
-				auth.isAdmin = false;
-			}
+					        // Track highest player ID to update nextPlayerId
+					        if (auth.playerId > maxId)
+					        {
+						        maxId = auth.playerId;
+					        }
 
-			// Track highest player ID to update nextPlayerId
-			if (auth.playerId > maxId)
-			{
-				maxId = auth.playerId;
-			}
+					        // Add to authenticated players map
+					        authenticatedPlayers[auth.username] = auth;
 
-			// Add to authenticated players map
-			authenticatedPlayers[auth.username] = auth;
+					        logger.debug("Loaded account: " + auth.username + " (ID: " + std::to_string(auth.playerId) + ")");
+				        }
 
-			logger.debug("Loaded account: " + auth.username + " (ID: " + std::to_string(auth.playerId) + ")");
-		}
+				        // Update nextPlayerId to be one more than the highest ID found
+				        if (maxId >= nextPlayerId)
+				        {
+					        nextPlayerId = maxId + 1;
+					        logger.info("Updated nextPlayerId to " + std::to_string(nextPlayerId));
+				        }
 
-		// Update nextPlayerId to be one more than the highest ID found
-		if (maxId >= nextPlayerId)
-		{
-			nextPlayerId = maxId + 1;
-			logger.info("Updated nextPlayerId to " + std::to_string(nextPlayerId));
-		}
+				        logger.info("Successfully loaded " + std::to_string(authenticatedPlayers.size()) + " player accounts from " + AUTH_DB_FILE);
+			        }
+		        }
+		        catch (const std::exception& e)
+		        {
+			        logger.error("Error loading auth data: " + std::string(e.what()));
+			        logger.error("Some player accounts may not have been loaded correctly");
+		        }
 
-		logger.info("Successfully loaded " + std::to_string(authenticatedPlayers.size()) + " player accounts from " + AUTH_DB_FILE);
-	}
-	catch (const std::exception& e)
-	{
-		logger.error("Error loading auth data: " + std::string(e.what()));
-		logger.error("Some player accounts may not have been loaded correctly");
-	}
-
-	file.close();
+		        file.close();
+	        });
 }
 
 // Save authentication data to file
 void GameServer::saveAuthData()
 {
-	std::scoped_lock<std::mutex> lock(authMutex);
+	// Schedule a resource task that requires Auth and Database resources
+	threadManager.scheduleResourceTask({ GameResources::AuthId, GameResources::DatabaseId },
+	        [this]()
+	        {
+		        logger.debug("Saving player authentication data...");
 
-	logger.debug("Saving player authentication data...");
+		        // Save to database if enabled
+		        if (config.useDatabase)
+		        {
+			        if (dbManager.saveAuthData(authenticatedPlayers))
+			        {
+				        logger.debug("Saved authentication data for " + std::to_string(authenticatedPlayers.size()) + " players to database");
+				        return;
+			        }
+			        else
+			        {
+				        logger.error("Failed to save player data to database. Falling back to file.");
+				        // Fall through to file-based saving if database fails
+			        }
+		        }
 
-	// Save to database if enabled
-	if (config.useDatabase)
-	{
-		if (dbManager.saveAuthData(authenticatedPlayers))
-		{
-			logger.debug("Saved authentication data for " + std::to_string(authenticatedPlayers.size()) + " players to database");
-			return;
-		}
-		else
-		{
-			logger.error("Failed to save player data to database. Falling back to file.");
-			// Fall through to file-based saving if database fails
-		}
-	}
+		        // Original file-based saving code (as fallback)
+		        // Create backup of existing file
+		        if (std::filesystem::exists(AUTH_DB_FILE))
+		        {
+			        try
+			        {
+				        std::filesystem::copy_file(AUTH_DB_FILE, std::string(AUTH_DB_FILE) + std::string(".bak"), std::filesystem::copy_options::overwrite_existing);
+			        }
+			        catch (const std::exception& e)
+			        {
+				        logger.error("Failed to create backup of auth file: " + std::string(e.what()));
+			        }
+		        }
 
-	// Original file-based saving code (as fallback)
-	// Create backup of existing file
-	if (std::filesystem::exists(AUTH_DB_FILE))
-	{
-		try
-		{
-			std::filesystem::copy_file(AUTH_DB_FILE, std::string(AUTH_DB_FILE) + std::string(".bak"), std::filesystem::copy_options::overwrite_existing);
-		}
-		catch (const std::exception& e)
-		{
-			logger.error("Failed to create backup of auth file: " + std::string(e.what()));
-		}
-	}
+		        std::ofstream file(AUTH_DB_FILE, std::ios::binary);
+		        if (!file.is_open())
+		        {
+			        logger.error("Error: Could not open auth file for writing");
+			        return;
+		        }
 
-	std::ofstream file(AUTH_DB_FILE, std::ios::binary);
-	if (!file.is_open())
-	{
-		logger.error("Error: Could not open auth file for writing");
-		return;
-	}
+		        try
+		        {
+			        // Write number of entries
+			        size_t numEntries = authenticatedPlayers.size();
+			        file.write(reinterpret_cast<const char*>(&numEntries), sizeof(numEntries));
 
-	try
-	{
-		// Write number of entries
-		size_t numEntries = authenticatedPlayers.size();
-		file.write(reinterpret_cast<const char*>(&numEntries), sizeof(numEntries));
+			        // Write each entry
+			        for (const auto& pair: authenticatedPlayers)
+			        {
+				        const AuthData& auth = pair.second;
 
-		// Write each entry
-		for (const auto& pair: authenticatedPlayers)
-		{
-			const AuthData& auth = pair.second;
+				        // Write username
+				        size_t usernameLength = auth.username.length();
+				        file.write(reinterpret_cast<const char*>(&usernameLength), sizeof(usernameLength));
+				        file.write(auth.username.c_str(), usernameLength);
 
-			// Write username
-			size_t usernameLength = auth.username.length();
-			file.write(reinterpret_cast<const char*>(&usernameLength), sizeof(usernameLength));
-			file.write(auth.username.c_str(), usernameLength);
+				        // Write password hash
+				        size_t passwordHashLength = auth.passwordHash.length();
+				        file.write(reinterpret_cast<const char*>(&passwordHashLength), sizeof(passwordHashLength));
+				        file.write(auth.passwordHash.c_str(), passwordHashLength);
 
-			// Write password hash
-			size_t passwordHashLength = auth.passwordHash.length();
-			file.write(reinterpret_cast<const char*>(&passwordHashLength), sizeof(passwordHashLength));
-			file.write(auth.passwordHash.c_str(), passwordHashLength);
+				        // Write player ID
+				        file.write(reinterpret_cast<const char*>(&auth.playerId), sizeof(auth.playerId));
 
-			// Write player ID
-			file.write(reinterpret_cast<const char*>(&auth.playerId), sizeof(auth.playerId));
+				        // Write last login time
+				        file.write(reinterpret_cast<const char*>(&auth.lastLoginTime), sizeof(auth.lastLoginTime));
 
-			// Write last login time
-			file.write(reinterpret_cast<const char*>(&auth.lastLoginTime), sizeof(auth.lastLoginTime));
+				        // Write registration time
+				        file.write(reinterpret_cast<const char*>(&auth.registrationTime), sizeof(auth.registrationTime));
 
-			// Write registration time
-			file.write(reinterpret_cast<const char*>(&auth.registrationTime), sizeof(auth.registrationTime));
+				        // Write last position
+				        file.write(reinterpret_cast<const char*>(&auth.lastPosition), sizeof(auth.lastPosition));
 
-			// Write last position
-			file.write(reinterpret_cast<const char*>(&auth.lastPosition), sizeof(auth.lastPosition));
+				        // Write last IP address
+				        size_t ipLength = auth.lastIpAddress.length();
+				        file.write(reinterpret_cast<const char*>(&ipLength), sizeof(ipLength));
+				        file.write(auth.lastIpAddress.c_str(), ipLength);
 
-			// Write last IP address
-			size_t ipLength = auth.lastIpAddress.length();
-			file.write(reinterpret_cast<const char*>(&ipLength), sizeof(ipLength));
-			file.write(auth.lastIpAddress.c_str(), ipLength);
+				        // Write login count
+				        file.write(reinterpret_cast<const char*>(&auth.loginCount), sizeof(auth.loginCount));
 
-			// Write login count
-			file.write(reinterpret_cast<const char*>(&auth.loginCount), sizeof(auth.loginCount));
+				        // Write admin status
+				        file.write(reinterpret_cast<const char*>(&auth.isAdmin), sizeof(auth.isAdmin));
+			        }
 
-			// Write admin status
-			file.write(reinterpret_cast<const char*>(&auth.isAdmin), sizeof(auth.isAdmin));
-		}
-
-		file.close();
-		logger.debug("Saved authentication data for " + std::to_string(numEntries) + " players to file");
-	}
-	catch (const std::exception& e)
-	{
-		logger.error("Error saving auth data to file: " + std::string(e.what()));
-	}
+			        file.close();
+			        logger.debug("Saved authentication data for " + std::to_string(numEntries) + " players to file");
+		        }
+		        catch (const std::exception& e)
+		        {
+			        logger.error("Error saving auth data to file: " + std::string(e.what()));
+		        }
+	        });
 }
 
 // Load server configuration
@@ -2242,8 +2453,8 @@ void GameServer::createDefaultConfig()
 // Initialize command handlers
 void GameServer::initializeCommandHandlers()
 {
-	// Help command
-	commandHandlers["help"] = [this](Player& player, const std::vector<std::string>& args)
+	// Help command - Read-only, doesn't modify any state
+	commandHandlers["help"] = [this](const Player& player, const std::vector<std::string>& args)
 	{
 		std::string helpMessage = "Available commands:\n"
 		                          "/help - Show this help\n"
@@ -2266,16 +2477,16 @@ void GameServer::initializeCommandHandlers()
 		sendSystemMessage(player, helpMessage);
 	};
 
-	// Position command
-	commandHandlers["pos"] = [this](Player& player, const std::vector<std::string>& args)
+	// Position command - Read-only
+	commandHandlers["pos"] = [this](const Player& player, const std::vector<std::string>& args)
 	{
 		std::stringstream ss;
 		ss << "Current position: X=" << player.position.x << " Y=" << player.position.y << " Z=" << player.position.z;
 		sendSystemMessage(player, ss.str());
 	};
 
-	// Teleport command
-	commandHandlers["tp"] = [this](Player& player, const std::vector<std::string>& args)
+	// Teleport command - Requires write access to player and spatial grid
+	commandHandlers["tp"] = [this](const Player& player, const std::vector<std::string>& args)
 	{
 		if (args.size() < 4)
 		{
@@ -2289,19 +2500,32 @@ void GameServer::initializeCommandHandlers()
 			float y = std::stof(args[2]);
 			float z = std::stof(args[3]);
 
-			Position oldPos = player.position;
-			Position newPos = { x, y, z };
+			// Use a resource task to update the player's position safely
+			threadManager.scheduleResourceTask({ GameResources::PlayersId, GameResources::SpatialGridId },
+			        [this, playerId = player.id, x, y, z, args]()
+			        {
+				        // Find the player in the map
+				        auto playerIt = players.find(playerId);
+				        if (playerIt == players.end())
+				        {
+					        return; // Player no longer exists
+				        }
 
-			// Update player position
-			player.position = newPos;
-			player.lastValidPosition = newPos;
+				        Player& player = playerIt->second;
+				        Position oldPos = player.position;
+				        Position newPos = { x, y, z };
 
-			// Update in spatial grid
-			spatialGrid.updateEntity(player.id, oldPos, newPos);
+				        // Update player position
+				        player.position = newPos;
+				        player.lastValidPosition = newPos;
 
-			// Send teleport confirmation
-			sendTeleport(player, newPos);
-			sendSystemMessage(player, "Teleported to X=" + args[1] + " Y=" + args[2] + " Z=" + args[3]);
+				        // Update in spatial grid
+				        spatialGrid.updateEntity(playerId, oldPos, newPos);
+
+				        // Send teleport confirmation and message
+				        sendTeleport(player, newPos);
+				        sendSystemMessage(player, "Teleported to X=" + args[1] + " Y=" + args[2] + " Z=" + args[3]);
+			        });
 		}
 		catch (const std::exception& e)
 		{
@@ -2309,27 +2533,49 @@ void GameServer::initializeCommandHandlers()
 		}
 	};
 
-	// Players list command
-	commandHandlers["players"] = [this](Player& player, const std::vector<std::string>& args)
+	// Players list command - Needs read-only access to players
+	commandHandlers["players"] = [this](const Player& player, const std::vector<std::string>& args)
 	{
-		std::scoped_lock<std::mutex> lock(playersMutex);
+		// Use a read task to safely access the players map
+		threadManager.scheduleReadTask({ GameResources::PlayersId },
+		        [this, playerId = player.id]()
+		        {
+			        // First player might not exist anymore
+			        auto requesterIt = players.find(playerId);
+			        if (requesterIt == players.end())
+			        {
+				        return; // Player no longer exists
+			        }
 
-		std::stringstream ss;
-		ss << "Online players (" << players.size() << "):";
-		sendSystemMessage(player, ss.str());
+			        // Count authenticated players
+			        int authenticatedCount = 0;
+			        for (const auto& pair: players)
+			        {
+				        if (pair.second.isAuthenticated)
+				        {
+					        authenticatedCount++;
+				        }
+			        }
 
-		for (const auto& pair: players)
-		{
-			if (pair.second.isAuthenticated)
-			{
-				std::string adminTag = pair.second.isAdmin ? " [ADMIN]" : "";
-				sendSystemMessage(player, "- " + pair.second.name + adminTag);
-			}
-		}
+			        // Send the header message
+			        std::stringstream ss;
+			        ss << "Online players (" << authenticatedCount << "):";
+			        sendSystemMessage(requesterIt->second, ss.str());
+
+			        // Send each player in the list
+			        for (const auto& pair: players)
+			        {
+				        if (pair.second.isAuthenticated)
+				        {
+					        std::string adminTag = pair.second.isAdmin ? " [ADMIN]" : "";
+					        sendSystemMessage(requesterIt->second, "- " + pair.second.name + adminTag);
+				        }
+			        }
+		        });
 	};
 
-	// Me (action) command
-	commandHandlers["me"] = [this](Player& player, const std::vector<std::string>& args)
+	// Me (action) command - Doesn't modify state, just broadcasts
+	commandHandlers["me"] = [this](const Player& player, const std::vector<std::string>& args)
 	{
 		if (args.size() < 2)
 		{
@@ -2346,12 +2592,12 @@ void GameServer::initializeCommandHandlers()
 			action += args[i];
 		}
 
-		// Broadcast action message
-		broadcastChatMessage("ACTION", player.name + " " + action);
+		// Broadcast action message - Schedule as a task
+		threadManager.scheduleTask([this, playerName = player.name, action]() { broadcastChatMessage("ACTION", playerName + " " + action); });
 	};
 
-	// Whisper command
-	commandHandlers["w"] = [this](Player& player, const std::vector<std::string>& args)
+	// Whisper command - Needs read access to find target player
+	commandHandlers["w"] = [this](const Player& player, const std::vector<std::string>& args)
 	{
 		if (args.size() < 3)
 		{
@@ -2370,39 +2616,48 @@ void GameServer::initializeCommandHandlers()
 			message += args[i];
 		}
 
-		// Find target player
-		Player* targetPlayer = nullptr;
-		{
-			std::scoped_lock<std::mutex> lock(playersMutex);
-			for (auto& pair: players)
-			{
-				if (pair.second.isAuthenticated && pair.second.name == targetName)
-				{
-					targetPlayer = &pair.second;
-					break;
-				}
-			}
-		}
+		// Use a read task to find the target player
+		threadManager.scheduleReadTask({ GameResources::PlayersId },
+		        [this, senderPlayerId = player.id, targetName, message]()
+		        {
+			        // Find sender (who might not exist anymore)
+			        auto senderIt = players.find(senderPlayerId);
+			        if (senderIt == players.end())
+			        {
+				        return; // Sender no longer exists
+			        }
 
-		if (targetPlayer != nullptr)
-		{
-			// Send to target
-			std::string targetMsg = "CHAT:*WHISPER* " + player.name + ":" + message;
-			sendPacket(targetPlayer->peer, targetMsg, true);
+			        // Find target player
+			        Player* targetPlayer = nullptr;
+			        for (auto& pair: players)
+			        {
+				        if (pair.second.isAuthenticated && pair.second.name == targetName)
+				        {
+					        targetPlayer = &pair.second;
+					        break;
+				        }
+			        }
 
-			// Send confirmation to sender
-			sendSystemMessage(player, "Whisper to " + targetName + ": " + message);
-		}
-		else
-		{
-			sendSystemMessage(player, "Player not found: " + targetName);
-		}
+			        if (targetPlayer != nullptr)
+			        {
+				        // Send to target
+				        std::string targetMsg = "CHAT:*WHISPER* " + senderIt->second.name + ":" + message;
+				        sendPacket(targetPlayer->peer, targetMsg, true);
+
+				        // Send confirmation to sender
+				        sendSystemMessage(senderIt->second, "Whisper to " + targetName + ": " + message);
+			        }
+			        else
+			        {
+				        sendSystemMessage(senderIt->second, "Player not found: " + targetName);
+			        }
+		        });
 	};
 
 	// Admin commands
 
-	// Kick command
-	commandHandlers["kick"] = [this](Player& player, const std::vector<std::string>& args)
+	// Kick command - Needs resource access to find and kick player
+	commandHandlers["kick"] = [this](const Player& player, const std::vector<std::string>& args)
 	{
 		if (!player.isAdmin)
 		{
@@ -2417,12 +2672,20 @@ void GameServer::initializeCommandHandlers()
 		}
 
 		std::string targetName = args[1];
-		kickPlayer(targetName, player.name);
-		sendSystemMessage(player, "Attempted to kick player: " + targetName);
+
+		// Schedule the kick operation
+		threadManager.scheduleTask(
+		        [this, targetName, adminName = player.name]()
+		        {
+			        kickPlayer(targetName, adminName);
+			        // Note: kickPlayer has been refactored to use resource tasks internally
+		        });
+
+		sendSystemMessage(player, "Attempting to kick player: " + targetName);
 	};
 
-	// Ban command
-	commandHandlers["ban"] = [this](Player& player, const std::vector<std::string>& args)
+	// Ban command - Similar to kick
+	commandHandlers["ban"] = [this](const Player& player, const std::vector<std::string>& args)
 	{
 		if (!player.isAdmin)
 		{
@@ -2437,12 +2700,20 @@ void GameServer::initializeCommandHandlers()
 		}
 
 		std::string targetName = args[1];
-		banPlayer(targetName, player.name);
-		sendSystemMessage(player, "Attempted to ban player: " + targetName);
+
+		// Schedule the ban operation
+		threadManager.scheduleTask(
+		        [this, targetName, adminName = player.name]()
+		        {
+			        banPlayer(targetName, adminName);
+			        // Note: banPlayer has been refactored to use resource tasks internally
+		        });
+
+		sendSystemMessage(player, "Attempting to ban player: " + targetName);
 	};
 
-	// Broadcast command
-	commandHandlers["broadcast"] = [this](Player& player, const std::vector<std::string>& args)
+	// Broadcast command - Just broadcasts a message
+	commandHandlers["broadcast"] = [this](const Player& player, const std::vector<std::string>& args)
 	{
 		if (!player.isAdmin)
 		{
@@ -2465,12 +2736,17 @@ void GameServer::initializeCommandHandlers()
 			message += args[i];
 		}
 
-		broadcastSystemMessage("[Broadcast] " + message);
-		logger.info("Admin broadcast from " + player.name + ": " + message);
+		// Schedule the broadcast
+		threadManager.scheduleTask(
+		        [this, message, playerName = player.name]()
+		        {
+			        broadcastSystemMessage("[Broadcast] " + message);
+			        logger.info("Admin broadcast from " + playerName + ": " + message);
+		        });
 	};
 
-	// Set admin command
-	commandHandlers["setadmin"] = [this](Player& player, const std::vector<std::string>& args)
+	// Set admin command - Needs access to auth data
+	commandHandlers["setadmin"] = [this](const Player& player, const std::vector<std::string>& args)
 	{
 		if (!player.isAdmin)
 		{
@@ -2485,7 +2761,18 @@ void GameServer::initializeCommandHandlers()
 		}
 
 		std::string targetName = args[1];
-		if (setPlayerAdmin(targetName, true))
+
+		// Schedule the operation and get the result
+		bool success = threadManager
+		                       .scheduleResourceTaskWithResult<bool>({ GameResources::AuthId, GameResources::PlayersId },
+		                               [this, targetName]() -> bool
+		                               {
+			                               return setPlayerAdmin(targetName, true);
+			                               // Note: setPlayerAdmin has been refactored to work directly with resources
+		                               })
+		                       .get(); // Wait for the result
+
+		if (success)
 		{
 			sendSystemMessage(player, "Admin status granted to " + targetName);
 		}
@@ -2495,8 +2782,8 @@ void GameServer::initializeCommandHandlers()
 		}
 	};
 
-	// Teleport to player command
-	commandHandlers["tpplayer"] = [this](Player& player, const std::vector<std::string>& args)
+	// Teleport to player command - Needs access to players and spatial grid
+	commandHandlers["tpplayer"] = [this](const Player& player, const std::vector<std::string>& args)
 	{
 		if (!player.isAdmin)
 		{
@@ -2512,68 +2799,97 @@ void GameServer::initializeCommandHandlers()
 
 		std::string targetName = args[1];
 
-		// Find target player
-		Player* targetPlayer = nullptr;
-		{
-			std::scoped_lock<std::mutex> lock(playersMutex);
-			for (auto& pair: players)
-			{
-				if (pair.second.isAuthenticated && pair.second.name == targetName)
-				{
-					targetPlayer = &pair.second;
-					break;
-				}
-			}
-		}
+		// Use a resource task to safely teleport
+		threadManager.scheduleResourceTask({ GameResources::PlayersId, GameResources::SpatialGridId },
+		        [this, adminId = player.id, targetName]()
+		        {
+			        // Find the admin player
+			        auto adminIt = players.find(adminId);
+			        if (adminIt == players.end())
+			        {
+				        return; // Admin no longer exists
+			        }
 
-		if (targetPlayer != nullptr)
-		{
-			Position oldPos = player.position;
-			Position newPos = targetPlayer->position;
+			        // Find target player
+			        Player* targetPlayer = nullptr;
+			        for (auto& pair: players)
+			        {
+				        if (pair.second.isAuthenticated && pair.second.name == targetName)
+				        {
+					        targetPlayer = &pair.second;
+					        break;
+				        }
+			        }
 
-			// Update player position
-			player.position = newPos;
-			player.lastValidPosition = newPos;
+			        if (targetPlayer != nullptr)
+			        {
+				        Position oldPos = adminIt->second.position;
+				        Position newPos = targetPlayer->position;
 
-			// Update in spatial grid
-			spatialGrid.updateEntity(player.id, oldPos, newPos);
+				        // Update admin's position
+				        adminIt->second.position = newPos;
+				        adminIt->second.lastValidPosition = newPos;
 
-			// Send teleport confirmation
-			sendTeleport(player, newPos);
-			sendSystemMessage(player, "Teleported to player: " + targetName);
-		}
-		else
-		{
-			sendSystemMessage(player, "Player not found: " + targetName);
-		}
+				        // Update in spatial grid
+				        spatialGrid.updateEntity(adminId, oldPos, newPos);
+
+				        // Send teleport confirmation
+				        sendTeleport(adminIt->second, newPos);
+				        sendSystemMessage(adminIt->second, "Teleported to player: " + targetName);
+			        }
+			        else
+			        {
+				        sendSystemMessage(adminIt->second, "Player not found: " + targetName);
+			        }
+		        });
 	};
 }
 
 // Kick a player by name
 bool GameServer::kickPlayer(const std::string& playerName, const std::string& adminName)
 {
-	std::scoped_lock<std::mutex> lock(playersMutex);
+	// We need to be more explicit with the types to avoid template deduction issues
+	// Use a regular resource task and track the result manually
+	std::promise<bool> resultPromise;
+	std::future<bool> resultFuture = resultPromise.get_future();
 
-	for (auto& pair: players)
-	{
-		if (pair.second.isAuthenticated && pair.second.name == playerName)
-		{
-			// Send kick message
-			sendSystemMessage(pair.second, "You have been kicked by " + adminName);
+	// Schedule the task without using scheduleResourceTaskWithResult
+	threadManager.scheduleResourceTask({ GameResources::PlayersId },
+	        [this, playerName, adminName, &resultPromise]()
+	        {
+		        bool playerFound = false;
 
-			// Log the kick
-			logger.info("Player " + playerName + " kicked by " + adminName);
+		        for (auto& pair: players)
+		        {
+			        if (pair.second.isAuthenticated && pair.second.name == playerName)
+			        {
+				        // Cache player data needed for follow-up tasks
+				        Player playerCopy = pair.second;
+				        ENetPeer* playerPeer = pair.second.peer;
 
-			// Broadcast kick message
-			broadcastSystemMessage(playerName + " has been kicked by " + adminName);
+				        // Schedule sending a message to the kicked player
+				        threadManager.scheduleTask([this, playerCopy, adminName]() { sendSystemMessage(playerCopy, "You have been kicked by " + adminName); });
 
-			// Disconnect the player
-			enet_peer_disconnect(pair.second.peer, 0);
-			return true;
-		}
-	}
+				        // Log the kick
+				        logger.info("Player " + playerName + " kicked by " + adminName);
 
-	return false;
+				        // Schedule broadcasting the kick message
+				        threadManager.scheduleTask([this, playerName, adminName]() { broadcastSystemMessage(playerName + " has been kicked by " + adminName); });
+
+				        // Schedule disconnecting the player
+				        threadManager.scheduleTask([playerPeer]() { enet_peer_disconnect(playerPeer, 0); });
+
+				        playerFound = true;
+				        break;
+			        }
+		        }
+
+		        // Set the result in the promise
+		        resultPromise.set_value(playerFound);
+	        });
+
+	// Wait for and return the result
+	return resultFuture.get();
 }
 
 // Ban a player by name
@@ -2629,56 +2945,68 @@ bool GameServer::setPlayerAdmin(const std::string& playerName, bool isAdmin)
 // Print server status to console
 void GameServer::printServerStatus()
 {
-	uint32_t authenticatedCount = 0;
-	{
-		std::scoped_lock<std::mutex> lock(playersMutex);
-		for (const auto& pair: players)
-		{
-			if (pair.second.isAuthenticated)
-			{
-				authenticatedCount++;
-			}
-		}
-	}
+	// Use scheduleReadTask instead of scheduleReadTaskWithResult since we don't need the return value
+	threadManager.scheduleReadTask({ GameResources::PlayersId, GameResources::AuthId },
+	        [this]()
+	        {
+		        // Count authenticated players
+		        uint32_t authenticatedCount = 0;
+		        for (const auto& pair: players)
+		        {
+			        if (pair.second.isAuthenticated)
+			        {
+				        authenticatedCount++;
+			        }
+		        }
 
-	logger.info("===== Server Status =====");
-	logger.info("Version: " + std::string(VERSION));
-	logger.info("Uptime: " + Utils::formatUptime(stats.getUptimeSeconds()));
-	logger.info("Port: " + std::to_string(config.port));
-	logger.info("Players: " + std::to_string(authenticatedCount) + " online, " + std::to_string(authenticatedPlayers.size()) + " registered");
-	logger.info("Max concurrent players: " + std::to_string(stats.maxConcurrentPlayers));
-	logger.info("Total connections: " + std::to_string(stats.totalConnections));
-	logger.info("Failed auth attempts: " + std::to_string(stats.authFailures));
-	logger.info("Network stats:");
-	logger.info("  Packets: " + std::to_string(stats.totalPacketsSent) + " sent, " + std::to_string(stats.totalPacketsReceived) + " received");
-	logger.info("  Data: " + Utils::formatBytes(stats.totalBytesSent) + " sent, " + Utils::formatBytes(stats.totalBytesReceived) + " received");
-	logger.info("=========================");
+		        // Get the number of registered players
+		        uint32_t registeredCount = authenticatedPlayers.size();
+
+		        // Log server status
+		        logger.info("===== Server Status =====");
+		        logger.info("Version: " + std::string(VERSION));
+		        logger.info("Uptime: " + Utils::formatUptime(stats.getUptimeSeconds()));
+		        logger.info("Port: " + std::to_string(config.port));
+		        logger.info("Players: " + std::to_string(authenticatedCount) + " online, " + std::to_string(registeredCount) + " registered");
+		        logger.info("Max concurrent players: " + std::to_string(stats.maxConcurrentPlayers));
+		        logger.info("Total connections: " + std::to_string(stats.totalConnections));
+		        logger.info("Failed auth attempts: " + std::to_string(stats.authFailures));
+		        logger.info("Network stats:");
+		        logger.info("  Packets: " + std::to_string(stats.totalPacketsSent) + " sent, " + std::to_string(stats.totalPacketsReceived) + " received");
+		        logger.info("  Data: " + Utils::formatBytes(stats.totalBytesSent) + " sent, " + Utils::formatBytes(stats.totalBytesReceived) + " received");
+		        logger.info("Thread Pool: " + std::to_string(threadManager.getThreadCount()) + " threads");
+		        logger.info("=========================");
+	        });
 }
 
 // Print player list to console
 void GameServer::printPlayerList()
 {
-	std::scoped_lock<std::mutex> lock(playersMutex);
+	// Schedule a read task that requires Players resource
+	threadManager.scheduleReadTask({ GameResources::PlayersId },
+	        [this]()
+	        {
+		        logger.info("===== Online Players =====");
 
-	logger.info("===== Online Players =====");
+		        if (players.empty() || std::none_of(players.begin(), players.end(), [](const auto& pair) { return pair.second.isAuthenticated; }))
+		        {
+			        logger.info("No players online.");
+		        }
+		        else
+		        {
+			        for (const auto& pair: players)
+			        {
+				        if (pair.second.isAuthenticated)
+				        {
+					        std::string playerInfo =
+					                "- " + pair.second.name + " (ID: " + std::to_string(pair.second.id) + ")" + (pair.second.isAdmin ? " [ADMIN]" : "") + " @ X=" + std::to_string(pair.second.position.x) + " Y=" + std::to_string(pair.second.position.y) + " Z=" + std::to_string(pair.second.position.z) + " | IP: " + pair.second.ipAddress;
+					        logger.info(playerInfo);
+				        }
+			        }
+		        }
 
-	if (players.empty() || std::none_of(players.begin(), players.end(), [](const auto& pair) { return pair.second.isAuthenticated; }))
-	{
-		logger.info("No players online.");
-	}
-	else
-	{
-		for (const auto& pair: players)
-		{
-			if (pair.second.isAuthenticated)
-			{
-				std::string playerInfo = "- " + pair.second.name + " (ID: " + std::to_string(pair.second.id) + ")" + (pair.second.isAdmin ? " [ADMIN]" : "") + " @ X=" + std::to_string(pair.second.position.x) + " Y=" + std::to_string(pair.second.position.y) + " Z=" + std::to_string(pair.second.position.z) + " | IP: " + pair.second.ipAddress;
-				logger.info(playerInfo);
-			}
-		}
-	}
-
-	logger.info("=========================");
+		        logger.info("=========================");
+	        });
 }
 
 // Print console help

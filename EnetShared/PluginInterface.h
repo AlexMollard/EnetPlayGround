@@ -20,7 +20,7 @@
 struct ServerFunctions
 {
 	std::function<void(const std::string&)> broadcastSystemMessage;
-	std::function<void(Player&, const std::string&)> sendSystemMessage;
+	std::function<void(const Player&, const std::string&)> sendSystemMessage;
 	std::function<Logger*()> getLogger;
 	// Ill add more soon
 };
@@ -66,7 +66,7 @@ public:
 	{
 	}
 
-	virtual bool onPlayerCommand(Player& player, const std::string& command, const std::vector<std::string>& args)
+	virtual bool onPlayerCommand(const Player& player, const std::string& command, const std::vector<std::string>& args)
 	{
 		return false;
 	}

@@ -19,7 +19,7 @@
 #endif
 
 PluginManager::PluginManager(GameServer* server)
-      : server(server)
+      : server(server), threadManager(nullptr)
 {
 }
 
@@ -291,8 +291,25 @@ bool PluginManager::reloadPlugin(const std::string& name)
 		return false;
 	}
 
-	// Small delay to ensure the DLL/shared library is fully unloaded
-	std::this_thread::sleep_for(std::chrono::milliseconds(100));
+	if (threadManager)
+	{
+		std::promise<void> delayPromise;
+		auto delayFuture = delayPromise.get_future();
+
+		threadManager->scheduleTask(
+		        [&delayPromise]()
+		        {
+			        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+			        delayPromise.set_value();
+		        });
+
+		delayFuture.wait();
+	}
+	else
+	{
+		// Fallback to direct sleep if threadManager isn't available
+		std::this_thread::sleep_for(std::chrono::milliseconds(100));
+	}
 
 	return loadPlugin(path);
 }
@@ -388,11 +405,28 @@ void PluginManager::checkForPluginUpdates()
 	{
 		server->logger.info("Auto-reloading modified plugin: " + name);
 
-		if (unloadPlugin(name))
+		// Use ThreadManager if available, otherwise do it directly
+		if (threadManager)
 		{
-			// Small delay to ensure the DLL/shared library is fully unloaded
-			std::this_thread::sleep_for(std::chrono::milliseconds(100));
-			loadPlugin(path);
+			threadManager->scheduleTask(
+			        [this, name, path]()
+			        {
+				        if (unloadPlugin(name))
+				        {
+					        // Small delay to ensure the DLL/shared library is fully unloaded
+					        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+					        loadPlugin(path);
+				        }
+			        });
+		}
+		else
+		{
+			if (unloadPlugin(name))
+			{
+				// Small delay to ensure the DLL/shared library is fully unloaded
+				std::this_thread::sleep_for(std::chrono::milliseconds(100));
+				loadPlugin(path);
+			}
 		}
 	}
 }
@@ -556,7 +590,7 @@ void PluginManager::dispatchServerTick()
 	}
 }
 
-bool PluginManager::dispatchPlayerCommand(Player& player, const std::string& command, const std::vector<std::string>& args)
+bool PluginManager::dispatchPlayerCommand(const Player& player, const std::string& command, const std::vector<std::string>& args)
 {
 	auto pluginInstances = getPluginInstancesCopy();
 	bool commandHandled = false;

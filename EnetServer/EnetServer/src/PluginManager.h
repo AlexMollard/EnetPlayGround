@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <memory>
@@ -7,9 +8,9 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
-#include <atomic>
 
 #include "PluginInterface.h"
+#include "ThreadManager.h" // Added ThreadManager
 
 #ifdef _WIN32
 #	include <windows.h>
@@ -30,27 +31,22 @@ struct PluginInfo
 	DestroyPluginFunc destroyFunc = nullptr;
 	std::string path;
 	std::string name;
-	std::atomic<bool> isLoaded{false};
+	std::atomic<bool> isLoaded{ false };
 	std::filesystem::file_time_type lastModified;
-	
+
 	// Add copy constructor and assignment operator to handle atomic member
 	PluginInfo() = default;
-	
+
 	PluginInfo(const PluginInfo& other)
-		: handle(other.handle),
-		  instance(other.instance),
-		  createFunc(other.createFunc),
-		  destroyFunc(other.destroyFunc),
-		  path(other.path),
-		  name(other.name),
-		  lastModified(other.lastModified)
+	      : handle(other.handle), instance(other.instance), createFunc(other.createFunc), destroyFunc(other.destroyFunc), path(other.path), name(other.name), lastModified(other.lastModified)
 	{
 		isLoaded.store(other.isLoaded.load());
 	}
-	
+
 	PluginInfo& operator=(const PluginInfo& other)
 	{
-		if (this != &other) {
+		if (this != &other)
+		{
 			handle = other.handle;
 			instance = other.instance;
 			createFunc = other.createFunc;
@@ -62,16 +58,10 @@ struct PluginInfo
 		}
 		return *this;
 	}
-	
+
 	// Move operations should also be defined for completeness
 	PluginInfo(PluginInfo&& other) noexcept
-		: handle(other.handle),
-		  instance(other.instance),
-		  createFunc(other.createFunc),
-		  destroyFunc(other.destroyFunc),
-		  path(std::move(other.path)),
-		  name(std::move(other.name)),
-		  lastModified(other.lastModified)
+	      : handle(other.handle), instance(other.instance), createFunc(other.createFunc), destroyFunc(other.destroyFunc), path(std::move(other.path)), name(std::move(other.name)), lastModified(other.lastModified)
 	{
 		isLoaded.store(other.isLoaded.load());
 		other.handle = nullptr;
@@ -80,10 +70,11 @@ struct PluginInfo
 		other.destroyFunc = nullptr;
 		other.isLoaded.store(false);
 	}
-	
+
 	PluginInfo& operator=(PluginInfo&& other) noexcept
 	{
-		if (this != &other) {
+		if (this != &other)
+		{
 			handle = other.handle;
 			instance = other.instance;
 			createFunc = other.createFunc;
@@ -92,7 +83,7 @@ struct PluginInfo
 			name = std::move(other.name);
 			lastModified = other.lastModified;
 			isLoaded.store(other.isLoaded.load());
-			
+
 			other.handle = nullptr;
 			other.instance = nullptr;
 			other.createFunc = nullptr;
@@ -127,7 +118,7 @@ public:
 	void dispatchPlayerMessage(Player& player, const std::string& message);
 	void dispatchPlayerMove(Player& player, const Position& oldPos, const Position& newPos);
 	void dispatchServerTick();
-	bool dispatchPlayerCommand(Player& player, const std::string& command, const std::vector<std::string>& args);
+	bool dispatchPlayerCommand(const Player& player, const std::string& command, const std::vector<std::string>& args);
 	void dispatchChatMessage(const std::string& sender, const std::string& message);
 
 private:
@@ -177,6 +168,9 @@ private:
 	GameServer* server;
 	std::unordered_map<std::string, PluginInfo> plugins;
 	mutable std::shared_mutex pluginsMutex;
+
+	// Reference to the ThreadManager from the GameServer
+	ThreadManager* threadManager;
 
 	// Internal helpers
 	LibraryHandle loadLibrary(const std::string& path);

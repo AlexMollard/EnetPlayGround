@@ -205,7 +205,7 @@ public:
 		}
 	}
 
-    bool onPlayerCommand(Player& player, const std::string& command, const std::vector<std::string>& args) override
+    bool onPlayerCommand(const Player& player, const std::string& command, const std::vector<std::string>& args) override
 	{
 		// Cat-related commands
 		if (command == "cat")
@@ -372,7 +372,7 @@ private:
 		serverFuncs.getLogger()->info("CatPlugin: Cat is napping for " + std::to_string(napDurationMs / 60000) + " minutes");
 	}
 
-	void handlePetCommand(Player& player)
+	void handlePetCommand(const Player& player)
 	{
 		// Increase relationship with player
 		if (playerInteractions.find(player.name) != playerInteractions.end())
@@ -401,7 +401,7 @@ private:
 		}
 	}
 
-	void handleFeedCommand(Player& player, const std::vector<std::string>& args)
+	void handleFeedCommand(const Player& player, const std::vector<std::string>& args)
 	{
 		std::string food = "treats";
 		if (args.size() > 1)
@@ -435,7 +435,7 @@ private:
 		serverFuncs.broadcastSystemMessage(response);
 	}
 
-	void handlePlayCommand(Player& player)
+	void handlePlayCommand(const Player& player)
 	{
 		std::vector<std::string> playResponses = {
 			"*The server cat chases an invisible mouse around " + player.name + "*", "*The server cat pounces on a phantom toy, then looks at " + player.name + " proudly*", "*The server cat engages in play mode, zooming around " + player.name + "*", "*The server cat playfully bats at " + player.name + "'s shoelaces*"
@@ -445,7 +445,7 @@ private:
 		playerInteractions[player.name] += 2;
 	}
 
-	void displayCatStatus(Player& player)
+	void displayCatStatus(const Player& player)
 	{
 		int relationship = 0;
 		if (playerInteractions.find(player.name) != playerInteractions.end())

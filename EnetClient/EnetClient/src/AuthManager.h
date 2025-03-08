@@ -125,5 +125,5 @@ private:
      */
 	std::vector<std::string> splitString(const std::string& str, char delimiter);
 
-    std::shared_ptr<ThreadManager> threadManager;
+	std::shared_ptr<ThreadManager> threadManager;
 };

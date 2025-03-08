@@ -49,7 +49,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;WIN32_LEAN_AND_MEAN;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <LanguageStandard>stdcpp20</LanguageStandard>
+      <LanguageStandard>stdcpp23</LanguageStandard>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
       <AdditionalIncludeDirectories>$(SolutionDir)..\EnetShared;src</AdditionalIncludeDirectories>
     </ClCompile>
@@ -66,7 +66,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>NDEBUG;_CONSOLE;WIN32_LEAN_AND_MEAN;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <LanguageStandard>stdcpp20</LanguageStandard>
+      <LanguageStandard>stdcpp23</LanguageStandard>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
       <AdditionalIncludeDirectories>$(SolutionDir)..\EnetShared;src</AdditionalIncludeDirectories>
     </ClCompile>
@@ -79,6 +79,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="..\..\EnetShared\Logger.cpp" />
+    <ClCompile Include="..\..\EnetShared\ThreadManager.cpp" />
     <ClCompile Include="..\..\EnetShared\Utils.cpp" />
     <ClCompile Include="src\DatabaseManager.cpp" />
     <ClCompile Include="src\PluginManager.cpp" />
@@ -88,6 +89,9 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\EnetShared\Logger.h" />
+    <ClInclude Include="..\..\EnetShared\ThreadManager.h" />
+    <ClInclude Include="..\..\EnetShared\ThreadPool\thread_pool.h" />
+    <ClInclude Include="..\..\EnetShared\ThreadPool\thread_safe_queue.h" />
     <ClInclude Include="..\..\EnetShared\Utils.h" />
     <ClInclude Include="..\..\EnetShared\PluginInterface.h" />
     <ClInclude Include="..\..\EnetShared\Structs.h" />

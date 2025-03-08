@@ -17,17 +17,19 @@
 #include <unordered_map>
 #include <vadefs.h>
 #include <vector>
+#include <future>
 
 // Configuration
 #include "Constants.h"
+#include "DatabaseManager.h"
 #include "Logger.h"
 #include "PluginManager.h"
 #include "SpatialGrid.h"
 #include "Structs.h"
-#include "DatabaseManager.h"
+#include "ThreadManager.h"
 
 // Command handler function type
-using CommandHandler = std::function<void(Player&, const std::vector<std::string>&)>;
+using CommandHandler = std::function<void(const Player&, const std::vector<std::string>&)>;
 
 // Server stats
 struct ServerStats
@@ -75,6 +77,35 @@ struct ServerConfig
 	bool useDatabase = USE_DATABASE;
 };
 
+// Packet stats
+struct PacketStats
+{
+	std::atomic<uint32_t> totalBytesSent{ 0 };
+	std::atomic<uint32_t> totalBytesReceived{ 0 };
+};
+
+namespace GameResources
+{
+	// Helper to create resource IDs with the right type
+	template<typename T>
+	ResourceId create(const std::string& name)
+	{
+		return ThreadManager::createResourceId<T>(name);
+	}
+
+	// Main server resources
+	const ResourceId PlayersId = create<Player>("players");
+	const ResourceId AuthId = create<AuthData>("auth");
+	const ResourceId ChatId = create<ChatMessage>("chat");
+	const ResourceId NetworkId = create<ENetEvent>("network");
+	const ResourceId SpatialGridId = create<SpatialGrid>("spatialGrid");
+	const ResourceId PluginsId = create<PluginManager>("plugins");
+	const ResourceId ConfigId = create<ServerConfig>("config");
+	const ResourceId DatabaseId = create<DatabaseManager>("database");
+	const ResourceId PeerDataId = create<void*>("peerData");
+	const ResourceId PeerStatsId = create<PacketStats>("peerStats");
+}
+
 // Main game server class
 class GameServer
 {
@@ -96,7 +127,7 @@ public:
 
 	std::vector<std::string> getLoadedPlugins() const;
 
-	void sendSystemMessage(Player& player, const std::string& message);
+	void sendSystemMessage(const Player& player, const std::string& message);
 	void broadcastSystemMessage(const std::string& message);
 
 	std::vector<std::string> getOnlinePlayerNames();
@@ -107,23 +138,28 @@ private:
 	// Network
 	ENetHost* server = nullptr;
 	bool isRunning = false;
+	bool stopRequested = false;
+
+	// Thread Manager
+	ThreadManager threadManager;
+
+	// Periodic task handles - these will hold futures for repeating tasks
+	std::future<void> networkTaskFuture;
+	std::future<void> updateTaskFuture;
+	std::future<void> saveTaskFuture;
 
 	// Configuration
 	ServerConfig config;
 
 	// Player data
 	std::unordered_map<uint32_t, Player> players;
-	std::mutex playersMutex;
 	uint32_t nextPlayerId = 1;
-	std::mutex peerDataMutex; // For thread-safe access to peer->data
 
 	// Authentication storage
 	std::unordered_map<std::string, AuthData> authenticatedPlayers;
-	std::mutex authMutex;
 
 	// Chat history
 	std::deque<ChatMessage> chatHistory;
-	std::mutex chatMutex;
 
 	// Command handlers
 	std::unordered_map<std::string, CommandHandler> commandHandlers;
@@ -142,16 +178,8 @@ private:
 	std::thread updateThread;
 	std::thread saveThread;
 
-	// Packet stats
-	struct PacketStats
-	{
-		std::atomic<uint32_t> totalBytesSent{ 0 };
-		std::atomic<uint32_t> totalBytesReceived{ 0 };
-	};
-
 	// Stats tracking
 	std::unordered_map<uintptr_t, PacketStats> peerStats;
-	std::mutex peerStatsMutex;
 
 	// Pliugins
 	std::unique_ptr<PluginManager> pluginManager;
@@ -159,24 +187,28 @@ private:
 	uint32_t lastPluginCheckTime = 0;
 
 	// Private methods
-	void networkThreadFunc();
-	void updateThreadFunc();
-	void saveThreadFunc();
+	void networkTaskFunc();
+	void updateTaskFunc();
+	void saveTaskFunc();
+
+	// Method to schedule recurring tasks
+	void scheduleRecurringTask(std::function<void()> task, uint32_t intervalMs, std::future<void>& futureHandle, const std::string& taskName);
+
 	void handleClientConnect(const ENetEvent& event);
 	void handleClientMessage(const ENetEvent& event);
 	void handleClientDisconnect(const ENetEvent& event);
 	void handleAuthMessage(const std::string& authDataStr, ENetPeer* peer);
-	void handleRegistration(Player& player, const std::string& username, const std::string& password);
+	void handleRegistration(const Player& player, const std::string& username, const std::string& password);
 	void syncPlayerStats();
-	void handleDeltaPositionUpdate(Player& player, const std::string& deltaData);
-	void handleSendPosition(Player& player);
-	void handleChatMessage(Player& player, const std::string& message);
-	void handlePingMessage(Player& player, const std::string& pingData);
-	void handleCommandMessage(Player& player, const std::string& commandStr);
+	void handleDeltaPositionUpdate(uint32_t playerId, const std::string& deltaData);
+	void handleSendPosition(uint32_t playerId);
+	void handleChatMessage(const Player& player, const std::string& message);
+	void handlePingMessage(const Player& player, const std::string& pingData);
+	void handleCommandMessage(const Player& player, const std::string& commandStr);
 	void sendAuthResponse(ENetPeer* peer, bool success, const std::string& message);
 	void sendPacket(ENetPeer* peer, const std::string& message, bool reliable);
 	void sendSystemMessage(uint32_t playerId, const std::string& message);
-	void sendTeleport(Player& player, const Position& position);
+	void sendTeleport(const Player& player, const Position& position);
 	void broadcastWorldState();
 	void checkTimeouts();
 	void broadcastChatMessage(const std::string& sender, const std::string& message);

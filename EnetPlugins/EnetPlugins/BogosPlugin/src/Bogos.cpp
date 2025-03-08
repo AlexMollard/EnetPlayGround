@@ -73,7 +73,7 @@ public:
 		}
 	}
 
-	bool onPlayerCommand(Player& player, const std::string& command, const std::vector<std::string>& args) override
+	bool onPlayerCommand(const Player& player, const std::string& command, const std::vector<std::string>& args) override
 	{
 		if (command == "bogos")
 		{
