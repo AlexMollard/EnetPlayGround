@@ -33,6 +33,9 @@ GameClient::GameClient()
 	// Create AuthManager
 	authManager = std::make_shared<AuthManager>(logger, networkManager);
 
+	// Complete the circular reference so NetworkManager can forward auth responses
+	networkManager->setAuthManager(authManager);
+
 	// Try to load stored credentials if none provided
 	if (myPlayerName.empty() || myPassword.empty())
 	{
@@ -218,33 +221,6 @@ void GameClient::processChatCommand(const std::string& command)
 void GameClient::handlePacket(const ENetPacket* packet)
 {
 	std::string message(reinterpret_cast<const char*>(packet->data), packet->dataLength);
-
-	// First, let AuthManager check if this is an auth response
-	bool wasAuthPacket = authManager->processAuthResponse(
-	        packet->data,
-	        packet->dataLength,
-	        // Auth success callback
-	        [this](uint32_t playerId)
-	        {
-		        this->myPlayerId = playerId;
-		        connectionState = ConnectionState::Connected;
-
-		        // Lets get the player position from the server
-		        std::string request = "POSITION:";
-		        networkManager->sendPacket(request);
-	        },
-	        // Auth failed callback
-	        [this](const std::string& errorMsg)
-	        {
-		        loginErrorMessage = "Authentication failed: " + errorMsg;
-		        connectionState = ConnectionState::LoginScreen;
-	        });
-
-	// If already handled by AuthManager, we're done
-	if (wasAuthPacket)
-	{
-		return;
-	}
 
 	if (message.substr(0, 13) == "REG_RESPONSE:")
 	{
@@ -664,16 +640,22 @@ void GameClient::startConnection()
 
 	connectionProgress = 0.5f;
 
-	// Start authentication
+	// Start authentication with callbacks that will be stored by AuthManager
 	bool authStarted = authManager->authenticate(
 	        myPlayerName,
 	        myPassword,
 	        rememberCredentials,
+	        // Success callback - this will be stored and called when auth response is received
 	        [this](uint32_t playerId)
 	        {
 		        this->myPlayerId = playerId;
 		        connectionState = ConnectionState::Connected;
+
+		        // Send a request to get the player's current position
+		        std::string request = "POSITION:";
+		        networkManager->sendPacket(request);
 	        },
+	        // Failure callback - this will be stored and called when auth fails
 	        [this](const std::string& errorMsg)
 	        {
 		        loginErrorMessage = "Authentication failed: " + errorMsg;
@@ -2053,7 +2035,7 @@ void GameClient::drawUI()
 	ImGui::Begin("MMO Client", nullptr, window_flags);
 
 	ImGui::PopStyleVar();
-	
+
 	// Check connection state and draw appropriate UI
 	if ((connectionState == ConnectionState::LoginScreen || connectionState == ConnectionState::RegisterScreen || connectionState == ConnectionState::Connecting || connectionState == ConnectionState::Authenticating) && !connectionInProgress)
 	{

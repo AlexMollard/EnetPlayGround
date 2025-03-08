@@ -891,7 +891,15 @@ void NetworkManager::update(const std::function<void()>& updatePositionCallback,
 
 								if (packetCopy)
 								{
-									handlePacketCallback(packetCopy);
+									// Try to process as an auth packet first
+									bool handled = processReceivedPacket(packetData.c_str(), packetData.length());
+
+									// If not handled as an auth packet, use the general callback
+									if (!handled && handlePacketCallback)
+									{
+										handlePacketCallback(packetCopy);
+									}
+
 									enet_packet_destroy(packetCopy);
 								}
 								else
@@ -903,6 +911,10 @@ void NetworkManager::update(const std::function<void()>& updatePositionCallback,
 							{
 								logger.error("Error in packet callback: " + std::string(e.what()));
 							}
+						}
+						else
+						{
+							processReceivedPacket(packetData.c_str(), packetData.length());
 						}
 
 						enet_packet_destroy(event.packet);
@@ -1520,6 +1532,24 @@ void NetworkManager::estimatePacketLoss()
 
 	packetLossEstimate = static_cast<float>(diagnostics.pingLost) / diagnostics.pingSent;
 	diagnostics.packetLossPercentage = static_cast<uint32_t>(packetLossEstimate * 100.0f);
+}
+
+bool NetworkManager::processReceivedPacket(const void* packetData, size_t packetLength)
+{
+	std::string message(reinterpret_cast<const char*>(packetData), packetLength);
+
+	// Check if this is an authentication response
+	if (message.substr(0, 13) == "AUTH_RESPONSE:" || message.substr(0, 8) == "WELCOME:")
+	{
+		if (authManager)
+		{
+			// Forward to auth manager and return true if processed
+			return authManager->processAuthResponse(packetData, packetLength, nullptr, nullptr);
+		}
+	}
+
+	// Not an auth packet or no auth manager to handle it
+	return false;
 }
 
 std::string NetworkManager::analyzeConnectionQuality()

@@ -14,6 +14,7 @@
 
 #include "Constants.h"
 #include "Logger.h"
+#include "AuthManager.h"
 
 /**
  * NetworkManager - Handles ENet networking for MMO environments
@@ -177,6 +178,11 @@ public:
 		isConnected = connected;
 	}
 
+	// Set the auth manager
+	void setAuthManager(std::shared_ptr<AuthManager> auth) { 
+        authManager = auth; 
+    }
+
 private:
 	// Connection states
 	enum class ConnectionState
@@ -230,6 +236,9 @@ private:
 	uint32_t serverResponseTimeout = 5000;
 	uint32_t adaptiveTimeoutMultiplier = 1;
 	bool waitingForPingResponse = false;
+
+	// Authentication
+	std::shared_ptr<AuthManager> authManager;
 
 	// Health monitoring
 	uint32_t successivePingFailures = 0;
@@ -407,4 +416,5 @@ private:
 	void updatePingStatistics(uint32_t pingTime);
 	void calculateJitter();
 	void estimatePacketLoss();
+	bool processReceivedPacket(const void* packetData, size_t packetLength);
 };

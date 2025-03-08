@@ -5,8 +5,8 @@
 #include <hello_imgui/hello_imgui.h>
 #include <iostream>
 
-#include "IconsLucide.h"
 #include "GameClient.h"
+#include "IconsLucide.h"
 #include "Logger.h"
 
 constexpr float BASE_FONT_SIZE = 16.0f;

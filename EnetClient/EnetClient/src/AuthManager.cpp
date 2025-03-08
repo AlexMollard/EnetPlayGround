@@ -19,52 +19,50 @@ AuthManager::~AuthManager()
 
 bool AuthManager::authenticate(const std::string& username, const std::string& password, bool rememberCredentials, const std::function<void(uint32_t)>& authSuccessCallback, const std::function<void(const std::string&)>& authFailedCallback)
 {
-	// Store the callbacks for later use when processing the response
-	this->authSuccessCallback = authSuccessCallback;
-	this->authFailedCallback = authFailedCallback;
+    // Store the callbacks for later use when processing the response
+    this->authSuccessCallback = authSuccessCallback;
+    this->authFailedCallback = authFailedCallback;
 
-	if (!networkManager->isConnectedToServer())
-	{
-		logger.error("Cannot authenticate: not connected to server");
-		if (authFailedCallback)
-		{
-			// Execute callback on a separate thread to avoid blocking
-			std::thread([failedCallback = authFailedCallback]() { failedCallback("Not connected to server"); }).detach();
-		}
-		return false;
-	}
+    if (!networkManager->isConnectedToServer())
+    {
+        logger.error("Cannot authenticate: not connected to server");
+        if (authFailedCallback)
+        {
+            // Execute callback on a separate thread to avoid blocking
+            std::thread([failedCallback = authFailedCallback]() { failedCallback("Not connected to server"); }).detach();
+        }
+        return false;
+    }
 
-	// Check for empty credentials
-	if (username.empty() || password.empty())
-	{
-		logger.error("Authentication failed: empty credentials");
-		if (authFailedCallback)
-		{
-			// Execute callback on a separate thread to avoid blocking
-			std::thread([failedCallback = authFailedCallback]() { failedCallback("Username or password cannot be empty"); }).detach();
-		}
-		return false;
-	}
+    // Check for empty credentials
+    if (username.empty() || password.empty())
+    {
+        logger.error("Authentication failed: empty credentials");
+        if (authFailedCallback)
+        {
+            // Execute callback on a separate thread to avoid blocking
+            std::thread([failedCallback = authFailedCallback]() { failedCallback("Username or password cannot be empty"); }).detach();
+        }
+        return false;
+    }
 
-	// Store credentials for later use
-	this->username = username;
-	this->password = password;
+    // Store credentials for later use
+    this->username = username;
+    this->password = password;
 
-	logger.debug("Authenticating as user: " + username);
+    logger.debug("Authenticating as user: " + username);
 
-	// Send authentication message - this should be non-blocking
-	std::string authMsg = "AUTH:" + username + "," + password;
-	networkManager->sendPacket(authMsg, true);
+    // Send authentication message - this should be non-blocking
+    std::string authMsg = "AUTH:" + username + "," + password;
+    networkManager->sendPacket(authMsg, true);
 
-	// Save credentials if requested
-	// This could potentially block, so do it in a separate thread if it gets large
-	if (rememberCredentials)
-	{
-		// For now we'll do it directly, but consider making asynchronous if file IO becomes an issue
-		saveCredentials(username, password);
-	}
+    // Save credentials if requested
+    if (rememberCredentials)
+    {
+        saveCredentials(username, password);
+    }
 
-	return true;
+    return true;
 }
 
 bool AuthManager::processAuthResponse(const void* packetData, size_t packetLength, const std::function<void(uint32_t)>& authSuccessCallback, const std::function<void(const std::string&)>& authFailedCallback)
