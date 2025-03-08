@@ -5,16 +5,131 @@
 #include <enet/enet.h>
 #include <functional>
 #include <memory>
-#include <mutex>
 #include <queue>
 #include <string>
 #include <thread>
 #include <unordered_map>
 #include <vector>
 
+#include "AuthManager.h"
 #include "Constants.h"
 #include "Logger.h"
-#include "AuthManager.h"
+#include "ThreadManager.h"
+
+// Advanced diagnostics
+struct NetworkDiagnostics
+{
+	// Connection quality metrics
+	uint32_t avgPingMs = 0;
+	uint32_t minPingMs = UINT32_MAX;
+	uint32_t maxPingMs = 0;
+	float pingStdDeviation = 0.0f;
+	uint32_t packetLossPercentage = 0;
+
+	// Connection stability
+	uint32_t disconnectionCount = 0;
+	uint32_t reconnectionCount = 0;
+	uint32_t reconnectionAttempts = 0;
+	uint64_t timeToReconnectMs = 0;
+
+	// Ping sequence tracking
+	uint32_t pingSent = 0;
+	uint32_t pingReceived = 0;
+	uint32_t pingLost = 0;
+
+	// Error tracking
+	uint32_t packetCreationErrors = 0;
+	uint32_t packetSendErrors = 0;
+	uint32_t enetServiceErrors = 0;
+	uint64_t lastErrorTime = 0;
+
+	// Time tracking
+	uint64_t connectionStartTime = 0;
+	uint64_t totalConnectedTimeMs = 0;
+	uint64_t lastConnectionTime = 0;
+	uint64_t longestDowntimeMs = 0;
+
+	// MMO-specific stats
+	uint32_t zoneTransitionCount = 0;
+	uint64_t avgZoneLoadingTimeMs = 0;
+	float combatPacketSuccessRate = 100.0f;
+	uint32_t avgCombatActionLatencyMs = 0;
+	uint32_t highDensityAreaCount = 0;
+	float highDensityPositionUpdatesPerSecond = 0.0f;
+	float serverResponseConsistency = 1.0f;
+
+	void reset();
+};
+
+struct QueuedPacket
+{
+	std::string message;
+	bool reliable;
+	uint64_t timestamp;
+	uint8_t priority;
+	uint32_t retryCount;
+
+	QueuedPacket(const std::string& msg, bool rel, uint8_t pri = 128)
+	      : message(msg), reliable(rel), timestamp(0), priority(pri), retryCount(0)
+	{
+	}
+
+	bool operator<(const QueuedPacket& other) const
+	{
+		return priority != other.priority ? priority > other.priority : timestamp > other.timestamp;
+	}
+};
+
+// Bandwidth management
+struct BandwidthStats
+{
+	size_t bytesSentLastSecond = 0;
+	size_t bytesReceivedLastSecond = 0;
+	uint64_t currentSecondStart = 0;
+	float averageSendRateBps = 0;
+	float averageReceiveRateBps = 0;
+	std::vector<size_t> sendRateHistory;
+	std::vector<size_t> receiveRateHistory;
+	uint32_t maxHistorySize = 30;
+};
+
+// Message categories
+enum class MessageCategory
+{
+	CRITICAL,  // Auth, connection management
+	GAMEPLAY,  // Important gameplay events
+	POSITION,  // Position updates
+	CHAT,      // Chat messages
+	TELEMETRY, // Stats, analytics
+	MISC       // Miscellaneous
+};
+
+// Message type configuration
+struct MessageTypeConfig
+{
+	MessageCategory category;
+	uint8_t priority;
+	bool canThrottle;
+	float throttleMultiplier;
+};
+
+namespace GameResources
+{
+	// Helper to create resource IDs with the right type
+	template<typename T>
+	ResourceId create(const std::string& name)
+	{
+		return ThreadManager::createResourceId<T>(name);
+	}
+
+	// This is basically a struct to control task execution
+	struct NetworkState {};
+
+	const ResourceId networkResourceId = create<NetworkState>("NetworkState");
+	const ResourceId queueResourceId = create<QueuedPacket>("PacketQueue");
+	const ResourceId bandwidthResourceId = create<BandwidthStats>("BandwidthStats");
+	const ResourceId configResourceId = create<MessageTypeConfig>("MessageConfig");
+} // namespace GameResources
 
 /**
  * NetworkManager - Handles ENet networking for MMO environments
@@ -36,6 +151,8 @@ public:
 	void disconnect(bool showMessage = true);
 	bool reconnectToServer();
 
+	void updateConnectionDiagnostics(uint64_t connectStartTime);
+
 	// Packet sending
 	void sendPacket(const std::string& message, bool reliable = true);
 	void sendPacketWithPriority(const std::string& message, bool reliable, uint8_t priority);
@@ -49,27 +166,27 @@ public:
 	// Configuration
 	void setServerResponseTimeout(uint32_t timeoutMs)
 	{
-		serverResponseTimeout = timeoutMs;
+		threadManager->scheduleResourceTask({ GameResources::networkResourceId }, [this, timeoutMs]() { serverResponseTimeout = timeoutMs; });
 	}
 
 	void setConnectionCheckInterval(uint32_t intervalMs)
 	{
-		connectionCheckInterval = intervalMs;
+		threadManager->scheduleResourceTask({ GameResources::configResourceId }, [this, intervalMs]() { connectionCheckInterval = intervalMs; });
 	}
 
 	void configureAdaptiveTimeout(uint32_t initial, uint32_t max, uint32_t pingFailures);
-	void configureBandwidthManagement(uint32_t outgoingLimitBps, uint32_t throttledLimitBps, bool enableThrottling);
-	void setPacketQueueing(bool enabled, uint32_t maxSize = 1000, uint32_t maxAgeMs = 30000);
+	void configureBandwidthManagement(size_t outgoingLimitBps, size_t throttledLimitBps, bool enableThrottling);
+	void setPacketQueueing(bool enabled, size_t maxSize = 1000, uint32_t maxAgeMs = 30000);
 	void configureMessageType(const std::string& prefix, uint8_t priority, bool canThrottle, float throttleMultiplier);
 
 	void setReconnectAttempts(uint32_t attempts)
 	{
-		reconnectAttempts = attempts;
+		threadManager->scheduleResourceTask({ GameResources::configResourceId }, [this, attempts]() { reconnectAttempts = attempts; });
 	}
 
 	void setHeartbeatInterval(uint32_t intervalMs)
 	{
-		heartbeatIntervalMs = intervalMs;
+		threadManager->scheduleResourceTask({ GameResources::configResourceId }, [this, intervalMs]() { heartbeatIntervalMs = intervalMs; });
 	}
 
 	void configureCompression(bool enabled, uint32_t minSize = 100, float minRatio = 0.8f);
@@ -114,22 +231,22 @@ public:
 		return pingMs;
 	}
 
-	uint32_t getPacketsSent() const
+	size_t getPacketsSent() const
 	{
 		return packetsSent;
 	}
 
-	uint32_t getPacketsReceived() const
+	size_t getPacketsReceived() const
 	{
 		return packetsReceived;
 	}
 
-	uint32_t getBytesSent() const
+	size_t getBytesSent() const
 	{
 		return bytesSent;
 	}
 
-	uint32_t getBytesReceived() const
+	size_t getBytesReceived() const
 	{
 		return bytesReceived;
 	}
@@ -144,7 +261,7 @@ public:
 		return serverPort;
 	}
 
-	uint32_t getQueuedPacketCount();
+	size_t getQueuedPacketCount();
 	std::string getConnectionStateString() const;
 
 	bool isNetworkDegraded() const
@@ -165,25 +282,34 @@ public:
 	// Setters
 	void setServerAddress(const std::string& address)
 	{
-		serverAddress = address;
+		threadManager->scheduleResourceTask({ GameResources::networkResourceId }, [this, address]() { serverAddress = address; });
 	}
 
 	void setServerPort(uint16_t port)
 	{
-		serverPort = port;
+		threadManager->scheduleResourceTask({ GameResources::networkResourceId }, [this, port]() { serverPort = port; });
 	}
 
 	void setConnected(bool connected)
 	{
-		isConnected = connected;
+		threadManager->scheduleResourceTask({ GameResources::networkResourceId }, [this, connected]() { isConnected = connected; });
 	}
 
 	// Set the auth manager
-	void setAuthManager(std::shared_ptr<AuthManager> auth) { 
-        authManager = auth; 
-    }
+	void setAuthManager(std::shared_ptr<AuthManager> auth)
+	{
+		authManager = auth;
+	}
 
 private:
+	// Mutexes for thread safety
+	mutable std::mutex enetMutex;                            // Protects all ENet operations
+	mutable std::mutex connectionStateMutex;                 // Protects connection state variables
+	mutable std::mutex diagnosticsMutex;                     // Protects diagnostics data
+	mutable std::mutex bandwidthMutex;                       // Protects bandwidth management
+	mutable std::mutex queueMutex;                           // Protects the packet queue
+	std::atomic<bool> connectionInProgress{ false }; // Prevent concurrent connection attempts
+
 	// Connection states
 	enum class ConnectionState
 	{
@@ -192,17 +318,6 @@ private:
 		CONNECTED,
 		RECONNECTING,
 		DISCONNECTING
-	};
-
-	// Message categories
-	enum class MessageCategory
-	{
-		CRITICAL,  // Auth, connection management
-		GAMEPLAY,  // Important gameplay events
-		POSITION,  // Position updates
-		CHAT,      // Chat messages
-		TELEMETRY, // Stats, analytics
-		MISC       // Miscellaneous
 	};
 
 	// ENet components
@@ -219,12 +334,12 @@ private:
 	int serverThrottleLevel = 0;
 
 	// Connection monitoring
-	uint32_t lastPingTime = 0;
-	uint32_t lastPingSentTime = 0;
-	uint32_t lastHeartbeatSent = 0;
+	uint64_t lastPingTime = 0;
+	uint64_t lastPingSentTime = 0;
+	uint64_t lastHeartbeatSent = 0;
 	uint32_t pingMs = 0;
-	uint32_t lastServerResponseTime = 0;
-	uint32_t lastNetworkActivity = 0;
+	uint64_t lastServerResponseTime = 0;
+	uint64_t lastNetworkActivity = 0;
 	uint32_t connectionCheckInterval = 1000;
 	uint32_t heartbeatIntervalMs = 2000;
 	uint32_t pingIntervalMs = 5000;
@@ -253,37 +368,15 @@ private:
 	uint32_t pingSequence = 0;
 
 	// Network statistics
-	uint32_t packetsSent = 0;
-	uint32_t packetsReceived = 0;
-	uint32_t bytesSent = 0;
-	uint32_t bytesReceived = 0;
-
-	// Bandwidth management
-	struct BandwidthStats
-	{
-		uint32_t bytesSentLastSecond = 0;
-		uint32_t bytesReceivedLastSecond = 0;
-		uint32_t currentSecondStart = 0;
-		float averageSendRateBps = 0;
-		float averageReceiveRateBps = 0;
-		std::vector<uint32_t> sendRateHistory;
-		std::vector<uint32_t> receiveRateHistory;
-		uint32_t maxHistorySize = 30;
-	};
+	size_t packetsSent = 0;
+	size_t packetsReceived = 0;
+	size_t bytesSent = 0;
+	size_t bytesReceived = 0;
 
 	BandwidthStats bandwidthStats;
-	uint32_t outgoingBandwidthLimit = 0;
-	uint32_t throttledOutgoingLimit = 0;
+	size_t outgoingBandwidthLimit = 0;
+	size_t throttledOutgoingLimit = 0;
 	bool bandwidthThrottlingEnabled = false;
-
-	// Message type configuration
-	struct MessageTypeConfig
-	{
-		MessageCategory category;
-		uint8_t priority;
-		bool canThrottle;
-		float throttleMultiplier;
-	};
 
 	std::unordered_map<std::string, MessageTypeConfig> messageTypeConfigs;
 
@@ -293,7 +386,7 @@ private:
 		float tokens;
 		float rate;
 		float maxTokens;
-		uint32_t lastUpdate;
+		uint64_t lastUpdate;
 
 		// Add a default constructor
 		TokenBucket()
@@ -306,45 +399,26 @@ private:
 		{
 		}
 
-		bool consumeTokens(float amount, uint32_t currentTime);
+		bool consumeTokens(float amount, uint64_t currentTime);
 	};
 
 	TokenBucket bandwidthTokenBucket{ 0, 0 };
 	std::unordered_map<MessageCategory, TokenBucket> categoryTokenBuckets;
 
 	// Packet queuing system
-	struct QueuedPacket
-	{
-		std::string message;
-		bool reliable;
-		uint32_t timestamp;
-		uint8_t priority;
-		uint32_t retryCount;
-
-		QueuedPacket(const std::string& msg, bool rel, uint8_t pri = 128)
-		      : message(msg), reliable(rel), timestamp(0), priority(pri), retryCount(0)
-		{
-		}
-
-		bool operator<(const QueuedPacket& other) const
-		{
-			return priority != other.priority ? priority > other.priority : timestamp > other.timestamp;
-		}
-	};
-
 	std::priority_queue<QueuedPacket> outgoingQueue;
 	bool queuePacketsDuringDisconnection = true;
-	uint32_t maxQueueSize = 1000;
+	size_t maxQueueSize = 1000;
 	uint32_t maxQueuedPacketAge = 30000;
 
 	// Message compression
 	bool compressionEnabled = false;
-	uint32_t minSizeForCompression = 100;
+	size_t minSizeForCompression = 100;
 	float minCompressionRatio = 0.8f;
 
 	// MMO-specific features
 	bool inZoneTransition = false;
-	uint32_t zoneTransitionStartTime = 0;
+	uint64_t zoneTransitionStartTime = 0;
 	uint32_t zoneTransitionTimeout = 30000;
 	std::string currentAreaOfInterest;
 	int areaOfInterestRadius = 0;
@@ -352,64 +426,17 @@ private:
 	uint32_t positionPrecision = 2;
 	uint32_t positionUpdateInterval = 100;
 
-	// Advanced diagnostics
-	struct NetworkDiagnostics
-	{
-		// Connection quality metrics
-		uint32_t avgPingMs = 0;
-		uint32_t minPingMs = UINT32_MAX;
-		uint32_t maxPingMs = 0;
-		float pingStdDeviation = 0.0f;
-		uint32_t packetLossPercentage = 0;
-
-		// Connection stability
-		uint32_t disconnectionCount = 0;
-		uint32_t reconnectionCount = 0;
-		uint32_t reconnectionAttempts = 0;
-		uint32_t timeToReconnectMs = 0;
-
-		// Ping sequence tracking
-		uint32_t pingSent = 0;
-		uint32_t pingReceived = 0;
-		uint32_t pingLost = 0;
-
-		// Error tracking
-		uint32_t packetCreationErrors = 0;
-		uint32_t packetSendErrors = 0;
-		uint32_t enetServiceErrors = 0;
-		uint32_t lastErrorTime = 0;
-
-		// Time tracking
-		uint32_t connectionStartTime = 0;
-		uint32_t totalConnectedTimeMs = 0;
-		uint32_t lastConnectionTime = 0;
-		uint32_t longestDowntimeMs = 0;
-
-		// MMO-specific stats
-		uint32_t zoneTransitionCount = 0;
-		uint32_t avgZoneLoadingTimeMs = 0;
-		float combatPacketSuccessRate = 100.0f;
-		uint32_t avgCombatActionLatencyMs = 0;
-		uint32_t highDensityAreaCount = 0;
-		float highDensityPositionUpdatesPerSecond = 0.0f;
-		float serverResponseConsistency = 1.0f;
-
-		void reset();
-	};
-
 	NetworkDiagnostics diagnostics;
 
 	std::shared_ptr<ThreadManager> threadManager;
 
 	// Dependencies
 	Logger& logger;
-	std::mutex networkMutex;
-	std::mutex queueMutex;
 
 	// Private methods
-	uint32_t getCurrentTimeMs();
+	uint64_t getCurrentTimeMs();
 	void updateBandwidthStats();
-	bool isPacketSendAllowed(const std::string& message, uint32_t size);
+	bool isPacketSendAllowed(const std::string& message, float size);
 	MessageTypeConfig getMessageConfig(const std::string& message);
 	void sendHeartbeat();
 	void cleanExpiredPackets();

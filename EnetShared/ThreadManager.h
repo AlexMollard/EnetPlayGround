@@ -20,17 +20,6 @@
 #include <Windows.h>
 
 /**
- * Enum for defining task priorities
- */
-enum class TaskPriority
-{
-	Low,
-	Normal,
-	High,
-	Critical
-};
-
-/**
  * Resource identifier struct - used to identify resources for synchronization
  */
 struct ResourceId
