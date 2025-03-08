@@ -24,6 +24,43 @@ std::string Logger::currentInputLine;
 std::mutex Logger::inputMutex;
 bool Logger::inputActive = false;
 
+// ErrorContext implementation
+std::string ErrorContext::toString() const
+{
+	std::stringstream ss;
+	ss << "{ ";
+
+	if (errorCode)
+	{
+		ss << "Code: " << *errorCode << ", ";
+	}
+
+	if (category)
+	{
+		ss << "Category: \"" << *category << "\", ";
+	}
+
+	if (component)
+	{
+		ss << "Component: \"" << *component << "\", ";
+	}
+
+	if (details)
+	{
+		ss << "Details: \"" << *details << "\"";
+	}
+
+	// Remove trailing comma and space if present
+	std::string result = ss.str();
+	if (result.size() > 2 && result.substr(result.size() - 2) == ", ")
+	{
+		result.resize(result.size() - 2);
+	}
+
+	result += " }";
+	return result;
+}
+
 Logger::Logger()
       : logFilePath(DEBUG_LOG_FILE)
 {
@@ -155,9 +192,29 @@ void Logger::setLogFilePath(const std::string& filePath)
 	}
 }
 
+void Logger::setAutoStackTraceForErrors(bool enable)
+{
+	autoStackTraceForErrors = enable;
+}
+
+void Logger::setStackTraceMaxFrames(int frames)
+{
+	stackTraceMaxFrames = frames;
+}
+
 LogLevel Logger::getLogLevel() const
 {
 	return minLevel;
+}
+
+bool Logger::getAutoStackTraceForErrors() const
+{
+	return autoStackTraceForErrors;
+}
+
+int Logger::getStackTraceMaxFrames() const
+{
+	return stackTraceMaxFrames;
 }
 
 std::string Logger::getTimestamp()
@@ -457,11 +514,40 @@ void Logger::warning(const std::string& message)
 void Logger::error(const std::string& message)
 {
 	log(LogLevel::ERR, message, true);
+
+	// Automatically add stack trace if enabled
+	if (autoStackTraceForErrors)
+	{
+		std::string stackTrace = StackTrace::capture(1, stackTraceMaxFrames);
+		log(LogLevel::ERR, "Stack trace for previous error:" + stackTrace, true);
+	}
 }
 
 void Logger::fatal(const std::string& message)
 {
 	log(LogLevel::FATAL, message, true);
+
+	// Automatically add stack trace if enabled
+	if (autoStackTraceForErrors)
+	{
+		std::string stackTrace = StackTrace::capture(1, stackTraceMaxFrames);
+		log(LogLevel::FATAL, "Stack trace for previous fatal error:" + stackTrace, true);
+	}
+}
+
+// Enhanced error logging with context
+void Logger::error(const std::string& message, const ErrorContext& context)
+{
+	std::stringstream ss;
+	ss << message << " " << context.toString();
+	error(ss.str());
+}
+
+void Logger::fatal(const std::string& message, const ErrorContext& context)
+{
+	std::stringstream ss;
+	ss << message << " " << context.toString();
+	fatal(ss.str());
 }
 
 void Logger::logNetworkEvent(const std::string& message)
@@ -493,6 +579,44 @@ void Logger::logWithContext(LogLevel level, const std::string& message, const st
 
 	std::string contextInfo = file + ":" + std::to_string(line) + " " + function;
 	std::string fullMessage = message + " (" + contextInfo + ")";
+
+	log(level, fullMessage);
+
+	// Auto-add stack trace for errors if enabled
+	if (autoStackTraceForErrors && (level == LogLevel::ERR || level == LogLevel::FATAL))
+	{
+		std::string stackTrace = StackTrace::capture(1, stackTraceMaxFrames);
+		log(level, "Stack trace:" + stackTrace);
+	}
+}
+
+void Logger::logWithStackTrace(const char* message)
+{
+	if (LogLevel::ERR < minLevel)
+		return;
+
+	std::string stackTrace = StackTrace::capture(2); // Skip this function
+	std::string fullMessage = std::string(message) + "\nStack trace:" + stackTrace;
+
+	log(LogLevel::ERR, fullMessage);
+}
+
+void Logger::logWithStackTrace(const std::string& message, const std::source_location& location)
+{
+	logWithStackTrace(LogLevel::ERR, message, location);
+}
+
+void Logger::logWithStackTrace(LogLevel level, const std::string& message, const std::source_location& location)
+{
+	if (level < minLevel)
+		return;
+
+	// Format source location information
+	std::stringstream sourceInfo;
+	sourceInfo << "[" << location.file_name() << ":" << location.line() << " in " << location.function_name() << "]";
+
+	std::string stackTrace = StackTrace::capture(1, stackTraceMaxFrames); // Just skip this function
+	std::string fullMessage = message + " " + sourceInfo.str() + "\nStack trace:" + stackTrace;
 
 	log(level, fullMessage);
 }

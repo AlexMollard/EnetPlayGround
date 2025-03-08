@@ -78,6 +78,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="..\..\EnetShared\StackTrace.cpp" />
     <ClCompile Include="..\..\EnetShared\Logger.cpp" />
     <ClCompile Include="..\..\EnetShared\ThreadManager.cpp" />
     <ClCompile Include="..\..\EnetShared\Utils.cpp" />
@@ -88,6 +89,7 @@
     <ClCompile Include="src\Server.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\..\EnetShared\StackTrace.h" />
     <ClInclude Include="..\..\EnetShared\Logger.h" />
     <ClInclude Include="..\..\EnetShared\ThreadManager.h" />
     <ClInclude Include="..\..\EnetShared\ThreadPool\thread_pool.h" />

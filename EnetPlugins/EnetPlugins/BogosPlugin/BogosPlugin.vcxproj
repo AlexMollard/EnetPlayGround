@@ -76,11 +76,13 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="..\..\EnetShared\StackTrace.cpp" />
     <ClCompile Include="..\..\..\EnetShared\Logger.cpp" />
     <ClCompile Include="..\..\..\EnetShared\Utils.cpp" />
     <ClCompile Include="src\bogos.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\..\EnetShared\StackTrace.h" />
     <ClInclude Include="..\..\..\EnetShared\IconsLucide.h" />
     <ClInclude Include="..\..\..\EnetShared\Logger.h" />
     <ClInclude Include="..\..\..\EnetShared\Utils.h" />

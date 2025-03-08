@@ -1,10 +1,17 @@
 #pragma once
 
+#include <format>
 #include <fstream>
 #include <memory>
 #include <mutex>
+#include <optional>
+#include <source_location>
+#include <span>
+#include <sstream>
 #include <string>
 #include <vector>
+
+#include "StackTrace.h"
 
 // Using ERR instead of ERROR to avoid conflict with Windows.h
 enum class LogLevel
@@ -18,6 +25,18 @@ enum class LogLevel
 	OFF      // Logging disabled
 };
 
+// Structure to hold error context information
+struct ErrorContext
+{
+	std::optional<int> errorCode;
+	std::optional<std::string> category;
+	std::optional<std::string> component;
+	std::optional<std::string> details;
+
+	// Format the error context as a string
+	std::string toString() const;
+};
+
 class Logger
 {
 private:
@@ -27,6 +46,8 @@ private:
 	LogLevel minLevel = LogLevel::DEBUG;
 	size_t maxFileSize = 10 * 1024 * 1024; // 10 MB default
 	int maxBackupFiles = 3;
+	bool autoStackTraceForErrors = true;
+	int stackTraceMaxFrames = 32;
 
 	std::string logFilePath;
 	bool logToConsole = true;
@@ -68,9 +89,13 @@ public:
 	void setLogToConsole(bool enable);
 	void setLogToFile(bool enable);
 	void setLogFilePath(const std::string& filePath);
+	void setAutoStackTraceForErrors(bool enable);
+	void setStackTraceMaxFrames(int frames);
 
 	// Get current logger state
 	LogLevel getLogLevel() const;
+	bool getAutoStackTraceForErrors() const;
+	int getStackTraceMaxFrames() const;
 
 	// Core logging methods
 	void log(LogLevel level, const std::string& message, bool showOnConsole = true);
@@ -83,15 +108,23 @@ public:
 	void error(const std::string& message);
 	void fatal(const std::string& message);
 
-	void logNetworkEvent(const std::string& message);
+	// Enhanced error logging with context
+	void error(const std::string& message, const ErrorContext& context);
+	void fatal(const std::string& message, const ErrorContext& context);
 
-	// Additional category methods
+	// Category methods
+	void logNetworkEvent(const std::string& message);
 	void logDatabaseEvent(const std::string& message);
 	void logSecurityEvent(const std::string& message);
 	void logPerformance(const std::string& message, long long duration);
 
 	// Log with context
 	void logWithContext(LogLevel level, const std::string& message, const std::string& file, int line, const std::string& function);
+
+	// Stack trace logging
+	void logWithStackTrace(const char* message);
+	void logWithStackTrace(const std::string& message, const std::source_location& location = std::source_location::current());
+	void logWithStackTrace(LogLevel level, const std::string& message, const std::source_location& location = std::source_location::current());
 
 	// Performance tracking
 	class ScopedTimer
@@ -119,5 +152,42 @@ public:
 #define LOG_ERROR(logger, message) logger.logWithContext(LogLevel::ERR, message, __FILE__, __LINE__, __FUNCTION__)
 #define LOG_FATAL(logger, message) logger.logWithContext(LogLevel::FATAL, message, __FILE__, __LINE__, __FUNCTION__)
 
+// Enhanced error macros with context
+#define LOG_ERROR_WITH_CONTEXT(logger, message, context)                                                       \
+	do                                                                                                         \
+	{                                                                                                          \
+		const auto loc = std::source_location::current();                                                      \
+		std::stringstream ss;                                                                                  \
+		ss << message << " [" << loc.file_name() << ":" << loc.line() << " in " << loc.function_name() << "]"; \
+		logger.error(ss.str(), context);                                                                       \
+	}                                                                                                          \
+	while (0)
+
+#define LOG_FATAL_WITH_CONTEXT(logger, message, context)                                                       \
+	do                                                                                                         \
+	{                                                                                                          \
+		const auto loc = std::source_location::current();                                                      \
+		std::stringstream ss;                                                                                  \
+		ss << message << " [" << loc.file_name() << ":" << loc.line() << " in " << loc.function_name() << "]"; \
+		logger.fatal(ss.str(), context);                                                                       \
+	}                                                                                                          \
+	while (0)
+
+// Callstack log macros
+#define LOG_STACK_TRACE(logger, level, message) logger.logWithStackTrace(level, message, std::source_location::current())
+#define LOG_STACK_TRACE_TRACE(logger, message) logger.logWithStackTrace(LogLevel::TRACE, message, std::source_location::current())
+#define LOG_STACK_TRACE_DEBUG(logger, message) logger.logWithStackTrace(LogLevel::DEBUG, message, std::source_location::current())
+#define LOG_STACK_TRACE_INFO(logger, message) logger.logWithStackTrace(LogLevel::INFO, message, std::source_location::current())
+#define LOG_STACK_TRACE_WARNING(logger, message) logger.logWithStackTrace(LogLevel::WARNING, message, std::source_location::current())
+#define LOG_STACK_TRACE_ERROR(logger, message) logger.logWithStackTrace(LogLevel::ERR, message, std::source_location::current())
+#define LOG_STACK_TRACE_FATAL(logger, message) logger.logWithStackTrace(LogLevel::FATAL, message, std::source_location::current())
+
 // Performance tracking macro
 #define LOG_PERF_SCOPE(logger, operation) Logger::ScopedTimer scopedTimer(logger, operation)
+
+// Error context creation helper
+#define MAKE_ERROR_CONTEXT(...) \
+	ErrorContext                \
+	{                           \
+		__VA_ARGS__             \
+	}
