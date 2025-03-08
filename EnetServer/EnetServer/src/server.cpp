@@ -349,6 +349,9 @@ void GameServer::shutdown()
 		}
 	}
 
+	// Save player data
+	saveAuthData();
+
 	// Wait for ongoing tasks to complete
 	try
 	{
@@ -389,9 +392,6 @@ void GameServer::shutdown()
 	{
 		logger.error("Exception during task shutdown: " + std::string(e.what()));
 	}
-
-	// Save player data
-	saveAuthData();
 
 	// Clean up ENet
 	if (server != nullptr)

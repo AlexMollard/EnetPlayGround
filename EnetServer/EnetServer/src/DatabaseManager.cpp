@@ -23,13 +23,6 @@ bool DatabaseManager::connect()
 		return false;
 	}
 
-	// Enable auto-reconnect for reliability
-	bool reconnect = 1;
-	if (mysql_options(connection, MYSQL_OPT_RECONNECT, &reconnect))
-	{
-		logger.warning("Failed to set MySQL reconnect option");
-	}
-
 	// Connect to database
 	if (mysql_real_connect(connection, host.c_str(), user.c_str(), password.c_str(), database.c_str(), port, nullptr, 0) == nullptr)
 	{
