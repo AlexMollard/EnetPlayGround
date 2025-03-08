@@ -69,7 +69,7 @@ public:
 		};
 
 		// Initialize random engine
-		randomEngine.seed(std::chrono::system_clock::now().time_since_epoch().count());
+		randomEngine.seed((unsigned int) std::chrono::system_clock::now().time_since_epoch().count());
 	}
 
 	// Updated onLoad to accept function pointers
@@ -528,7 +528,7 @@ private:
 		{
 			return T();
 		}
-		std::uniform_int_distribution<int> distribution(0, elements.size() - 1);
+		std::uniform_int_distribution<int> distribution(0, (int)elements.size() - 1);
 		return elements[distribution(randomEngine)];
 	}
 
