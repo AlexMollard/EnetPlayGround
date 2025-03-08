@@ -82,6 +82,7 @@ The primary focus of this sandbox is to test various networking approaches, unde
 - **🌐 ENet**: Reliable UDP networking library for client-server communication
 - **🖌️ Hello ImGui**: Cross-platform GUI library for interface development
 - **🗃️ MySQL Connector**: Database connectivity for persistent storage
+- **🔧 Thread-Pool**: A modern, fast, lightweight thread pool library based on C++20
 
 ### 🛠️ Development Tools
 - **📦 vcpkg**: C++ package manager for dependency management

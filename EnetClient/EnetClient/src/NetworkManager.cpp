@@ -65,10 +65,16 @@ void NetworkManager::NetworkDiagnostics::reset()
 }
 
 // Constructor with enhanced initialization
-NetworkManager::NetworkManager(Logger& logger)
-      : logger(logger), bandwidthTokenBucket(0, 0) // Will be properly initialized later
+NetworkManager::NetworkManager(Logger& logger, std::shared_ptr<ThreadManager> threadManager)
+      : logger(logger), bandwidthTokenBucket(0, 0), threadManager(threadManager) // Will be properly initialized later
 {
 	logger.debug("Initializing Enhanced NetworkManager");
+
+	// Create a thread manager if none provided
+	if (!threadManager)
+	{
+		this->threadManager = std::make_shared<ThreadManager>();
+	}
 
 	// Default packet type configuration
 	messageTypeConfigs["AUTH:"] = { MessageCategory::CRITICAL, PRIORITY_CRITICAL, false, 1.0f };
@@ -382,7 +388,13 @@ bool NetworkManager::reconnectToServer()
 	{
 		logger.debug("Reconnection attempt " + std::to_string(attempt) + " of " + std::to_string(reconnectAttempts));
 
-		if (connectToServer(serverAddress.c_str(), serverPort))
+		// Create a future for the connection attempt
+		auto future = threadManager->scheduleTaskWithResult([this]() -> bool { return connectToServer(serverAddress.c_str(), serverPort); });
+
+		// Wait for the result
+		bool connected = future.get();
+
+		if (connected)
 		{
 			logger.info("Reconnection successful!");
 			reconnecting = false;
@@ -827,80 +839,32 @@ void NetworkManager::update(const std::function<void()>& updatePositionCallback,
 							}
 						}
 
-						// Extract and validate ping response (format: "PONG:timestamp:sequence")
-						if (packetData.substr(0, 5) == "PONG:")
-						{
-							try
-							{
-								// Extract timestamp
-								size_t colonPos = packetData.find(':', 5);
-								if (colonPos != std::string::npos)
-								{
-									std::string timeStr = packetData.substr(5, colonPos - 5);
-
-									// Extract sequence number if present
-									uint32_t sequence = 0;
-									size_t secondColonPos = packetData.find(':', colonPos + 1);
-									if (secondColonPos != std::string::npos)
-									{
-										sequence = std::stoul(packetData.substr(secondColonPos + 1));
-									}
-
-									uint32_t pingTime = std::stoul(timeStr);
-
-									// Update ping time
-									uint32_t roundTripTime = getCurrentTimeMs() - pingTime;
-									pingMs = roundTripTime;
-
-									// Update ping statistics
-									updatePingStatistics(roundTripTime);
-
-									// Reset failure counter on successful ping
-									successivePingFailures = 0;
-									waitingForPingResponse = false;
-
-									// If network was degraded but we got a response, gradually recover timeout
-									if (adaptiveTimeoutMultiplier > 1 && networkDegraded)
-									{
-										adaptiveTimeoutMultiplier--;
-										uint32_t newTimeout = initialServerResponseTimeout * adaptiveTimeoutMultiplier;
-										serverResponseTimeout = newTimeout;
-									}
-								}
-							}
-							catch (std::exception& e)
-							{
-								logger.error("Error parsing ping response: " + std::string(e.what()));
-							}
-						}
-
 						// Update stats
 						packetsReceived++;
 						bytesReceived += event.packet->dataLength;
 						bandwidthStats.bytesReceivedLastSecond += event.packet->dataLength;
 						lastNetworkActivity = getCurrentTimeMs();
 
-						// Process packet with callback
-						if (handlePacketCallback)
+						// Try to process as an auth packet first
+						bool handled = processReceivedPacket(packetData.c_str(), packetData.length());
+
+						// If not handled as an auth packet and we have a callback
+						if (!handled && handlePacketCallback)
 						{
 							try
 							{
 								// We need to create a copy of the packet for the callback
-								// since we're going to destroy the original after returning from this scope
 								ENetPacket* packetCopy = enet_packet_create(packetData.c_str(), packetData.length(), event.packet->flags);
 
 								if (packetCopy)
 								{
-									// Try to process as an auth packet first
-									bool handled = processReceivedPacket(packetData.c_str(), packetData.length());
-
-									// If not handled as an auth packet, use the general callback
-									if (!handled && handlePacketCallback)
-									{
-										handlePacketCallback(packetCopy);
-									}
-
-									enet_packet_destroy(packetCopy);
+									// Use thread manager for packet handling
+									threadManager->scheduleNetworkTask(
+									        [callback = handlePacketCallback, packet = packetCopy]()
+									        {
+										        callback(packet);
+										        enet_packet_destroy(packet); // Clean up after use
+									        });
 								}
 								else
 								{
@@ -911,10 +875,6 @@ void NetworkManager::update(const std::function<void()>& updatePositionCallback,
 							{
 								logger.error("Error in packet callback: " + std::string(e.what()));
 							}
-						}
-						else
-						{
-							processReceivedPacket(packetData.c_str(), packetData.length());
 						}
 
 						enet_packet_destroy(event.packet);
@@ -927,12 +887,10 @@ void NetworkManager::update(const std::function<void()>& updatePositionCallback,
 						connectionState = ConnectionState::DISCONNECTED;
 						server = nullptr;
 
-						// Schedule disconnect callback to be called outside the lock
+						// Schedule disconnect callback using thread manager
 						if (disconnectCallback)
 						{
-							// Use a copy to ensure callback is called outside lock
-							auto callbackCopy = disconnectCallback;
-							std::thread([callbackCopy]() { callbackCopy(); }).detach();
+							threadManager->scheduleNetworkTask(disconnectCallback);
 						}
 						return; // Exit early on disconnect
 
@@ -963,17 +921,10 @@ void NetworkManager::update(const std::function<void()>& updatePositionCallback,
 		}
 	} // End of mutex lock scope
 
-	// Call position update callback outside the lock
+	// Call position update callback outside the lock using thread manager
 	if (updatePositionCallback && isConnected && connectionState == ConnectionState::CONNECTED)
 	{
-		try
-		{
-			updatePositionCallback();
-		}
-		catch (std::exception& e)
-		{
-			logger.error("Exception in position update callback: " + std::string(e.what()));
-		}
+		threadManager->scheduleTask(updatePositionCallback);
 	}
 
 	// Check if we need to send a heartbeat

@@ -28,7 +28,7 @@ public:
 	static constexpr uint8_t PRIORITY_NORMAL = 128;
 	static constexpr uint8_t PRIORITY_LOW = 192;
 
-	NetworkManager(Logger& logger);
+	NetworkManager(Logger& logger, std::shared_ptr<ThreadManager> threadManager = nullptr);
 	~NetworkManager();
 
 	bool initialize();
@@ -398,6 +398,8 @@ private:
 	};
 
 	NetworkDiagnostics diagnostics;
+
+	std::shared_ptr<ThreadManager> threadManager;
 
 	// Dependencies
 	Logger& logger;

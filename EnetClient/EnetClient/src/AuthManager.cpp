@@ -6,10 +6,16 @@
 
 #include "NetworkManager.h"
 
-AuthManager::AuthManager(Logger& logger, std::shared_ptr<NetworkManager> networkManager)
-      : logger(logger), networkManager(networkManager)
+AuthManager::AuthManager(Logger& logger, std::shared_ptr<NetworkManager> networkManager, std::shared_ptr<ThreadManager> threadManager)
+      : logger(logger), networkManager(networkManager), threadManager(threadManager)
 {
 	logger.debug("Initializing AuthManager");
+
+	// Create a thread manager if none provided
+	if (!threadManager)
+	{
+		this->threadManager = std::make_shared<ThreadManager>();
+	}
 }
 
 AuthManager::~AuthManager()
@@ -19,50 +25,54 @@ AuthManager::~AuthManager()
 
 bool AuthManager::authenticate(const std::string& username, const std::string& password, bool rememberCredentials, const std::function<void(uint32_t)>& authSuccessCallback, const std::function<void(const std::string&)>& authFailedCallback)
 {
-    // Store the callbacks for later use when processing the response
-    this->authSuccessCallback = authSuccessCallback;
-    this->authFailedCallback = authFailedCallback;
+	// Store the callbacks for later use when processing the response
+	this->authSuccessCallback = authSuccessCallback;
+	this->authFailedCallback = authFailedCallback;
 
-    if (!networkManager->isConnectedToServer())
-    {
-        logger.error("Cannot authenticate: not connected to server");
-        if (authFailedCallback)
-        {
-            // Execute callback on a separate thread to avoid blocking
-            std::thread([failedCallback = authFailedCallback]() { failedCallback("Not connected to server"); }).detach();
-        }
-        return false;
-    }
+	if (!networkManager->isConnectedToServer())
+	{
+		logger.error("Cannot authenticate: not connected to server");
+		if (authFailedCallback)
+		{
+			// Use thread manager instead of creating a new thread
+			threadManager->scheduleTask([failedCallback = authFailedCallback]() { failedCallback("Not connected to server"); });
+		}
+		return false;
+	}
 
-    // Check for empty credentials
-    if (username.empty() || password.empty())
-    {
-        logger.error("Authentication failed: empty credentials");
-        if (authFailedCallback)
-        {
-            // Execute callback on a separate thread to avoid blocking
-            std::thread([failedCallback = authFailedCallback]() { failedCallback("Username or password cannot be empty"); }).detach();
-        }
-        return false;
-    }
+	// Check for empty credentials
+	if (username.empty() || password.empty())
+	{
+		logger.error("Authentication failed: empty credentials");
+		if (authFailedCallback)
+		{
+			// Use thread manager instead of creating a new thread
+			threadManager->scheduleTask([failedCallback = authFailedCallback]() { failedCallback("Username or password cannot be empty"); });
+		}
+		return false;
+	}
 
-    // Store credentials for later use
-    this->username = username;
-    this->password = password;
+	// Store credentials for later use
+	this->username = username;
+	this->password = password;
 
-    logger.debug("Authenticating as user: " + username);
+	logger.debug("Authenticating as user: " + username);
 
-    // Send authentication message - this should be non-blocking
-    std::string authMsg = "AUTH:" + username + "," + password;
-    networkManager->sendPacket(authMsg, true);
+	// Send authentication message - this should be non-blocking
+	std::string authMsg = "AUTH:" + username + "," + password;
+	networkManager->sendPacket(authMsg, true);
 
-    // Save credentials if requested
-    if (rememberCredentials)
-    {
-        saveCredentials(username, password);
-    }
+	// Save credentials if requested
+	if (rememberCredentials)
+	{
+		// Use a copy of credentials for thread safety
+		std::string usernameCopy = username;
+		std::string passwordCopy = password;
 
-    return true;
+		threadManager->scheduleTask([this, usernameCopy, passwordCopy]() { this->saveCredentials(usernameCopy, passwordCopy); });
+	}
+
+	return true;
 }
 
 bool AuthManager::processAuthResponse(const void* packetData, size_t packetLength, const std::function<void(uint32_t)>& authSuccessCallback, const std::function<void(const std::string&)>& authFailedCallback)
@@ -92,8 +102,8 @@ bool AuthManager::processAuthResponse(const void* packetData, size_t packetLengt
 
 					if (successCallback)
 					{
-						// Execute callback on a separate thread to avoid blocking
-						std::thread([successCallback, pid = playerId]() { successCallback(pid); }).detach();
+						// Use thread manager
+						threadManager->scheduleTask([successCallback, pid = playerId]() { successCallback(pid); });
 					}
 				}
 				catch (const std::exception& e)
@@ -101,8 +111,8 @@ bool AuthManager::processAuthResponse(const void* packetData, size_t packetLengt
 					logger.error("Failed to parse player ID: " + std::string(e.what()));
 					if (failedCallback)
 					{
-						// Execute callback on a separate thread to avoid blocking
-						std::thread([failedCallback, errorMsg = std::string("Server sent invalid player ID")]() { failedCallback(errorMsg); }).detach();
+						// Use thread manager
+						threadManager->scheduleTask([failedCallback, errorMsg = std::string("Server sent invalid player ID")]() { failedCallback(errorMsg); });
 					}
 				}
 			}
@@ -114,8 +124,8 @@ bool AuthManager::processAuthResponse(const void* packetData, size_t packetLengt
 
 				if (failedCallback)
 				{
-					// Execute callback on a separate thread to avoid blocking
-					std::thread([failedCallback, errorMsg = errorMessage]() { failedCallback(errorMsg); }).detach();
+					// Use thread manager
+					threadManager->scheduleTask([failedCallback, errorMsg = errorMessage]() { failedCallback(errorMsg); });
 				}
 			}
 		}
@@ -125,8 +135,8 @@ bool AuthManager::processAuthResponse(const void* packetData, size_t packetLengt
 			logger.error("Received malformed authentication response");
 			if (failedCallback)
 			{
-				// Execute callback on a separate thread to avoid blocking
-				std::thread([failedCallback]() { failedCallback("Received malformed authentication response"); }).detach();
+				// Use thread manager
+				threadManager->scheduleTask([failedCallback]() { failedCallback("Received malformed authentication response"); });
 			}
 		}
 
@@ -144,8 +154,8 @@ bool AuthManager::processAuthResponse(const void* packetData, size_t packetLengt
 
 			if (successCallback)
 			{
-				// Execute callback on a separate thread to avoid blocking
-				std::thread([successCallback, pid = playerId]() { successCallback(pid); }).detach();
+				// Use thread manager
+				threadManager->scheduleTask([successCallback, pid = playerId]() { successCallback(pid); });
 			}
 		}
 		catch (const std::exception& e)
@@ -153,8 +163,8 @@ bool AuthManager::processAuthResponse(const void* packetData, size_t packetLengt
 			logger.error("Failed to parse legacy player ID: " + std::string(e.what()));
 			if (failedCallback)
 			{
-				// Execute callback on a separate thread to avoid blocking
-				std::thread([failedCallback]() { failedCallback("Server sent invalid player ID"); }).detach();
+				// Use thread manager
+				threadManager->scheduleTask([failedCallback]() { failedCallback("Server sent invalid player ID"); });
 			}
 		}
 

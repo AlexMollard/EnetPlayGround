@@ -27,11 +27,16 @@ GameClient::GameClient()
 		logger.error("Failed to get console handle");
 	}
 
-	// Create NetworkManager
-	networkManager = std::make_shared<NetworkManager>(logger);
+	// Create the thread manager first - use slightly fewer threads than max
+	// to leave some CPU for the main thread and UI
+	size_t numThreads = max(1u, std::thread::hardware_concurrency() - 2);
+	threadManager = std::make_shared<ThreadManager>(numThreads);
 
-	// Create AuthManager
-	authManager = std::make_shared<AuthManager>(logger, networkManager);
+	// Create NetworkManager with thread manager
+	networkManager = std::make_shared<NetworkManager>(logger, threadManager);
+
+	// Create AuthManager with NetworkManager and thread manager
+	authManager = std::make_shared<AuthManager>(logger, networkManager, threadManager);
 
 	// Complete the circular reference so NetworkManager can forward auth responses
 	networkManager->setAuthManager(authManager);
@@ -40,7 +45,11 @@ GameClient::GameClient()
 	if (myPlayerName.empty() || myPassword.empty())
 	{
 		std::string loadedUsername, loadedPassword;
-		if (authManager->loadCredentials(loadedUsername, loadedPassword))
+
+		// Load credentials on thread pool and wait for result
+		auto future = threadManager->scheduleTaskWithResult([this, &loadedUsername, &loadedPassword]() { return authManager->loadCredentials(loadedUsername, loadedPassword); });
+
+		if (future.get()) // Wait for the result
 		{
 			myPlayerName = loadedUsername;
 			myPassword = loadedPassword;
@@ -72,6 +81,18 @@ GameClient::GameClient()
 GameClient::~GameClient()
 {
 	disconnect();
+
+	// First clean up NetworkManager and AuthManager to stop any ongoing operations
+	networkManager.reset();
+	authManager.reset();
+
+	// Wait for all tasks to complete before shutting down
+	if (threadManager)
+	{
+		threadManager->waitForTasks();
+		threadManager.reset();
+	}
+
 	logger.debug("Client shutdown complete");
 }
 
@@ -110,7 +131,9 @@ void GameClient::handleServerDisconnection()
 	if (!shouldExit && !reconnecting && autoLogin)
 	{
 		addChatMessage("System", "Attempting to reconnect...");
-		networkManager->reconnectToServer();
+
+		// Use thread manager for reconnection attempt
+		threadManager->scheduleNetworkTask([this]() { networkManager->reconnectToServer(); });
 	}
 }
 
@@ -615,9 +638,6 @@ void GameClient::startConnection()
 	connectionState = ConnectionState::Connecting;
 	loginErrorMessage.clear();
 
-	// Update state
-	connectionProgress = 0.1f;
-
 	// Ensure NetworkManager is initialized first
 	if (!networkManager->clientSetup())
 	{
@@ -629,50 +649,80 @@ void GameClient::startConnection()
 		}
 	}
 
-	// Connect to server using NetworkManager
-	bool connected = networkManager->connectToServer(networkManager->getServerAddress().c_str(), networkManager->getServerPort());
-	if (!connected)
-	{
-		loginErrorMessage = "Failed to connect to server";
-		connectionState = ConnectionState::LoginScreen;
-		return;
-	}
+	// Update state
+	connectionProgress = 0.1f;
 
-	connectionProgress = 0.5f;
-
-	// Start authentication with callbacks that will be stored by AuthManager
-	bool authStarted = authManager->authenticate(
-	        myPlayerName,
-	        myPassword,
-	        rememberCredentials,
-	        // Success callback - this will be stored and called when auth response is received
-	        [this](uint32_t playerId)
+	// Use thread manager for connection
+	threadManager->scheduleNetworkTask(
+	        [this]()
 	        {
-		        this->myPlayerId = playerId;
-		        connectionState = ConnectionState::Connected;
+		        // Connect to server using NetworkManager
+		        bool connected = networkManager->connectToServer(networkManager->getServerAddress().c_str(), networkManager->getServerPort());
 
-		        // Send a request to get the player's current position
-		        std::string request = "POSITION:";
-		        networkManager->sendPacket(request);
-	        },
-	        // Failure callback - this will be stored and called when auth fails
-	        [this](const std::string& errorMsg)
-	        {
-		        loginErrorMessage = "Authentication failed: " + errorMsg;
-		        connectionState = ConnectionState::LoginScreen;
-		        networkManager->disconnect(false);
+		        if (!connected)
+		        {
+			        // Update UI safely
+			        threadManager->scheduleUITask(
+			                [this]()
+			                {
+				                loginErrorMessage = "Failed to connect to server";
+				                connectionState = ConnectionState::LoginScreen;
+			                });
+			        return;
+		        }
+
+		        // Update connection progress
+		        threadManager->scheduleUITask([this]() { connectionProgress = 0.5f; });
+
+		        // Start authentication
+		        bool authStarted = authManager->authenticate(
+		                myPlayerName,
+		                myPassword,
+		                rememberCredentials,
+		                // Success callback
+		                [this](uint32_t playerId)
+		                {
+			                threadManager->scheduleUITask(
+			                        [this, playerId]()
+			                        {
+				                        this->myPlayerId = playerId;
+				                        connectionState = ConnectionState::Connected;
+
+				                        // Send a request to get player position
+				                        std::string request = "POSITION:";
+				                        networkManager->sendPacket(request);
+			                        });
+		                },
+		                // Failure callback
+		                [this](const std::string& errorMsg)
+		                {
+			                threadManager->scheduleUITask(
+			                        [this, errorMsg]()
+			                        {
+				                        loginErrorMessage = "Authentication failed: " + errorMsg;
+				                        connectionState = ConnectionState::LoginScreen;
+			                        });
+			                networkManager->disconnect(false);
+		                });
+
+		        if (!authStarted)
+		        {
+			        networkManager->disconnect(false);
+			        threadManager->scheduleUITask(
+			                [this]()
+			                {
+				                loginErrorMessage = "Failed to start authentication";
+				                connectionState = ConnectionState::LoginScreen;
+			                });
+		        }
+		        else
+		        {
+			        threadManager->scheduleUITask([this]() { connectionState = ConnectionState::Authenticating; });
+		        }
 	        });
 
-	if (!authStarted)
-	{
-		networkManager->disconnect(false);
-		loginErrorMessage = "Failed to start authentication";
-		connectionState = ConnectionState::LoginScreen;
-	}
-	else
-	{
-		connectionState = ConnectionState::Authenticating;
-	}
+	// Clear the chat messages
+	clearChatMessages();
 }
 
 // Process a single network update cycle
@@ -850,35 +900,53 @@ void GameClient::initiateRegistration()
 		return;
 	}
 
-	// Ensure NetworkManager is initialized
-	if (!networkManager->clientSetup())
+	// Use thread manager for registration process
+	threadManager->scheduleNetworkTask(
+	        [this, username, password]()
+	        {
+		        // Ensure NetworkManager is initialized
+		        if (!networkManager->clientSetup())
+		        {
+			        if (!initialize())
+			        {
+				        threadManager->scheduleUITask([this]() { registerErrorMessage = "Failed to initialize client"; });
+				        return;
+			        }
+		        }
+
+		        // Connect to the server
+		        if (!networkManager->connectToServer(networkManager->getServerAddress().c_str(), networkManager->getServerPort()))
+		        {
+			        threadManager->scheduleUITask([this]() { registerErrorMessage = "Failed to connect to server"; });
+			        return;
+		        }
+
+		        // Send registration request
+		        std::string registerPacket = "COMMAND:register " + username + " " + password;
+		        networkManager->sendPacket(registerPacket);
+
+		        // Update UI state
+		        threadManager->scheduleUITask(
+		                [this, username, password]()
+		                {
+			                // Set state to wait for registration response
+			                connectionState = ConnectionState::Authenticating;
+			                myPlayerName = username;
+
+			                // Copy credentials to login screen for convenience
+			                strncpy_s(loginUsernameBuffer, username.c_str(), sizeof(loginUsernameBuffer) - 1);
+			                strncpy_s(loginPasswordBuffer, password.c_str(), sizeof(loginPasswordBuffer) - 1);
+		                });
+	        });
+}
+
+std::string GameClient::getThreadStats() const
+{
+	if (threadManager)
 	{
-		if (!initialize())
-		{
-			registerErrorMessage = "Failed to initialize client";
-			return;
-		}
+		return threadManager->getStatistics();
 	}
-
-	// Connect to the server
-	if (!networkManager->connectToServer(networkManager->getServerAddress().c_str(), networkManager->getServerPort()))
-	{
-		registerErrorMessage = "Failed to connect to server";
-		return;
-	}
-
-	// Send registration request
-	std::string registerPacket = "COMMAND:register " + username + " " + password;
-	networkManager->sendPacket(registerPacket);
-
-	// Set state to wait for registration response
-	connectionState = ConnectionState::Authenticating;
-
-	myPlayerName = username;
-
-	// Copy credentials to login screen for convenience
-	strncpy_s(loginUsernameBuffer, username.c_str(), sizeof(loginUsernameBuffer) - 1);
-	strncpy_s(loginPasswordBuffer, password.c_str(), sizeof(loginPasswordBuffer) - 1);
+	return "Thread manager not initialized";
 }
 
 void GameClient::initiateConnection()
@@ -1691,6 +1759,11 @@ void GameClient::drawChatPanel(float width, float height)
 		std::lock_guard<std::mutex> chatLock(chatMutex);
 		for (const auto& msg: chatMessages)
 		{
+			if (msg.content.empty())
+			{
+				continue;
+			}
+
 			// Format timestamp
 			std::string timeStr = Utils::formatTimestamp(msg.timestamp);
 
@@ -2035,6 +2108,13 @@ void GameClient::drawUI()
 	ImGui::Begin("MMO Client", nullptr, window_flags);
 
 	ImGui::PopStyleVar();
+
+	if (showDebug && threadManager)
+	{
+		ImGui::Begin("Thread Statistics", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
+		ImGui::Text("%s", getThreadStats().c_str());
+		ImGui::End();
+	}
 
 	// Check connection state and draw appropriate UI
 	if ((connectionState == ConnectionState::LoginScreen || connectionState == ConnectionState::RegisterScreen || connectionState == ConnectionState::Connecting || connectionState == ConnectionState::Authenticating) && !connectionInProgress)

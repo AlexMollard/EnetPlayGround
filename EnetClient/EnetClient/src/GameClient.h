@@ -219,6 +219,9 @@ private:
 	// Themes 
 	ThemeManager themeManager;
 
+	// Thread management
+	std::shared_ptr<ThreadManager> threadManager;
+
 	//-------------------------------------------------------------------------
 	// PRIVATE METHODS
 	//-------------------------------------------------------------------------
@@ -287,6 +290,11 @@ private:
 	 * Kick off a registration attempt
 	 */
 	void initiateRegistration();
+
+	/**
+	 * Gets the current stats of the thread manager
+	 */ 
+	std::string getThreadStats() const;
 
 	/**
      * Initiate connection with current credentials
