@@ -463,9 +463,6 @@ void GameClient::parseWorldState(const std::string& stateData)
 				newPlayer.status = "active";
 
 				otherPlayers[id] = newPlayer;
-
-				// Notify about new player
-				addChatMessage("System", "Player joined: " + name);
 			}
 		}
 		catch (const std::exception& e)
