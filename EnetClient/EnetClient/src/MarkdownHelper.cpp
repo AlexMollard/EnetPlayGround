@@ -94,6 +94,8 @@ void MarkdownHelper::RenderMarkdown(const std::string& markdown, float wrapWidth
 	// Pop spacing
 	ImGui::PopStyleVar();
 
+	ImGui::Dummy(ImVec2(0, 4));
+
 	// Pop text wrap
 	ImGui::PopTextWrapPos();
 }

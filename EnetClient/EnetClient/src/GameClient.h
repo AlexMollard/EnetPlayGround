@@ -113,11 +113,6 @@ public:
 	void disconnect(bool showMessage = true);
 
 	/**
-     * Handle ImGui input
-     */
-	void handleImGuiInput();
-
-	/**
      * Process a single network update cycle
      */
 	void updateNetwork();
@@ -204,9 +199,6 @@ private:
 	std::deque<ChatMessage> chatMessages;
 	std::mutex chatMutex;
 	char chatInputBuffer[256] = { 0 };
-	bool chatFocused = false;
-	std::deque<std::string> commandHistory;
-	int commandHistoryIndex = -1;
 
 	// Connection monitoring
 	time_t lastUpdateTime = 0;
@@ -274,11 +266,6 @@ private:
      * Draw bottom status bar or footer
      */
 	void drawStatusBar();
-	
-	/**
-     * Logic for looping your history
-     */
-	void handleChatCommandHistory();
 
 	/**
      * Logic that runs when the user sends anything in chat

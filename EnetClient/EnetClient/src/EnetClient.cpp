@@ -200,7 +200,6 @@ int main(int argc, char* argv[])
 	params.callbacks.PreNewFrame = [client]()
 	{
 		client->updateNetwork();
-		client->handleImGuiInput();
 	};
 
 	// Handle clean exit

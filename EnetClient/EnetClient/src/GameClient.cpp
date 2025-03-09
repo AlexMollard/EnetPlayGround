@@ -14,8 +14,8 @@
 
 #include "Constants.h"
 #include "IconsLucide.h"
-#include "Utils.h"
 #include "MarkdownHelper.h"
+#include "Utils.h"
 
 // Constructor
 GameClient::GameClient()
@@ -510,125 +510,6 @@ void GameClient::clearChatMessages()
 	chatMessages.clear();
 }
 
-void GameClient::handleImGuiInput()
-{
-	// Get ImGui IO to check key states
-	ImGuiIO& io = ImGui::GetIO();
-
-	// Only process input when we're connected or in the login screen
-	if (connectionState == ConnectionState::LoginScreen)
-	{
-		// In login screen, ESC should exit the application
-		if (ImGui::IsKeyPressed(ImGuiKey_Escape, false))
-		{
-			shouldExit = true;
-		}
-
-		// Other login-specific input handling would go here
-		return;
-	}
-
-	// Below only applies to connected state
-
-	// First, handle global keys that work regardless of chat focus
-	if (ImGui::IsKeyPressed(ImGuiKey_Escape, false))
-	{
-		if (chatFocused)
-		{
-			// If in chat mode, ESC should exit chat mode first
-			chatFocused = false;
-			chatInputBuffer[0] = '\0';
-		}
-		else
-		{
-			// If not in chat mode, ESC should trigger exit
-			shouldExit = true;
-		}
-	}
-
-	// Toggle function keys should work regardless of chat focus
-	if (ImGui::IsKeyPressed(ImGuiKey_F1, false))
-	{
-		showDebug = !showDebug;
-		logger.setLogLevel(LogLevel::DEBUG);
-		addChatMessage("System", std::string("Debug mode ") + (showDebug ? "enabled" : "disabled"));
-	}
-
-	if (ImGui::IsKeyPressed(ImGuiKey_F3, false))
-	{
-		showStats = !showStats;
-		addChatMessage("System", std::string("Network stats ") + (showStats ? "enabled" : "disabled"));
-	}
-
-	// Handle toggle of chat focus with T key
-	if (ImGui::IsKeyPressed(ImGuiKey_T, false) && !chatFocused)
-	{
-		chatFocused = true;
-		chatInputBuffer[0] = '\0'; // Clear the input buffer when entering chat
-		return;                    // Don't process movement in the same frame as entering chat
-	}
-
-	// Only process movement keys when not in chat mode and when fully connected
-	if (!chatFocused && !io.WantTextInput && connectionState == ConnectionState::Connected)
-	{
-		// Get elapsed time since last frame for smooth movement
-		time_t currentTime = time(0);
-		float deltaTime = (currentTime - lastUpdateTime) / 1000.0f; // Convert to seconds
-		lastUpdateTime = currentTime;
-
-		// Use deltaTime for smooth movement regardless of frame rate
-		// Cap to reasonable values to prevent extreme movement on lag spikes
-		if (deltaTime > 0.1f)
-			deltaTime = 0.1f;
-		const float BASE_SPEED = 5.0f; // Units per second
-		const float MOVE_SPEED = BASE_SPEED * deltaTime;
-
-		// WASD movement on XZ plane
-		if (ImGui::IsKeyDown(ImGuiKey_W))
-			myPosition.z += MOVE_SPEED;
-		if (ImGui::IsKeyDown(ImGuiKey_S))
-			myPosition.z -= MOVE_SPEED;
-		if (ImGui::IsKeyDown(ImGuiKey_A))
-			myPosition.x -= MOVE_SPEED;
-		if (ImGui::IsKeyDown(ImGuiKey_D))
-			myPosition.x += MOVE_SPEED;
-
-		// QE for vertical movement on Y axis
-		if (ImGui::IsKeyDown(ImGuiKey_Q))
-			myPosition.y += MOVE_SPEED;
-		if (ImGui::IsKeyDown(ImGuiKey_E))
-			myPosition.y -= MOVE_SPEED;
-
-		// Check for command keys
-		if (ImGui::IsKeyPressed(ImGuiKey_Slash, false))
-		{
-			// Start chat with "/" for command entry
-			chatFocused = true;
-			chatInputBuffer[0] = '/';
-			chatInputBuffer[1] = '\0';
-		}
-
-		// Shortcut keys for common commands
-		if (ImGui::IsKeyPressed(ImGuiKey_P, false) && (io.KeyCtrl || io.KeyShift))
-		{
-			// Ctrl+P or Shift+P for player list
-			processChatCommand("/players");
-		}
-
-		if (ImGui::IsKeyPressed(ImGuiKey_L, false) && io.KeyCtrl)
-		{
-			// Ctrl+L to clear chat
-			processChatCommand("/clear");
-		}
-
-		if (ImGui::IsKeyPressed(ImGuiKey_R, false) && io.KeyCtrl)
-		{
-			// Ctrl+R to attempt reconnection
-			processChatCommand("/reconnect");
-		}
-	}
-}
-
 // Updated to synchronous connection
 void GameClient::startConnection()
 {
@@ -779,79 +660,13 @@ void GameClient::drawStatusBar()
 	ImGui::EndChild();
 }
 
-void GameClient::handleChatCommandHistory()
-{
-	// Add command history support
-	if (ImGui::IsKeyPressed(ImGuiKey_UpArrow) && chatFocused && !commandHistory.empty())
-	{
-		if (commandHistoryIndex == -1)
-		{
-			commandHistoryIndex = (int) commandHistory.size() - 1;
-		}
-		else if (commandHistoryIndex > 0)
-		{
-			commandHistoryIndex--;
-		}
-
-		if (commandHistoryIndex >= 0 && commandHistoryIndex < commandHistory.size())
-		{
-			strncpy_s(chatInputBuffer, commandHistory[commandHistoryIndex].c_str(), sizeof(chatInputBuffer) - 1);
-		}
-	}
-
-	if (ImGui::IsKeyPressed(ImGuiKey_DownArrow) && chatFocused && !commandHistory.empty() && commandHistoryIndex != -1)
-	{
-		if (commandHistoryIndex < static_cast<int>(commandHistory.size()) - 1)
-		{
-			commandHistoryIndex++;
-			strncpy_s(chatInputBuffer, commandHistory[commandHistoryIndex].c_str(), sizeof(chatInputBuffer) - 1);
-		}
-		else
-		{
-			commandHistoryIndex = -1;
-			chatInputBuffer[0] = '\0';
-		}
-	}
-
-	// Escape key exits chat focus
-	if (ImGui::IsKeyPressed(ImGuiKey_Escape) && chatFocused)
-	{
-		chatFocused = false;
-		chatInputBuffer[0] = '\0';
-	}
-}
-
 void GameClient::processChatInput()
 {
 	if (chatInputBuffer[0] != '\0')
 	{
 		std::string chatStr(chatInputBuffer);
 		processChatCommand(chatStr);
-
-		// Add to command history
-		if (!commandHistory.empty() && commandHistory.back() != chatStr)
-		{
-			commandHistory.push_back(chatStr);
-		}
-		else if (commandHistory.empty())
-		{
-			commandHistory.push_back(chatStr);
-		}
-
-		// Limit history size
-		while (commandHistory.size() > MAX_HISTORY_COMMANDS)
-		{
-			commandHistory.pop_front();
-		}
-
-		commandHistoryIndex = -1;
 		chatInputBuffer[0] = '\0'; // Clear input
-	}
-
-	// Keep focus if still in chat input field
-	if (ImGui::IsItemDeactivated())
-	{
-		chatFocused = false;
 	}
 }
 
@@ -1749,7 +1564,7 @@ void GameClient::drawChatPanel(float width, float height)
 	ImGui::Dummy(ImVec2(0, 10)); // Space after separator
 
 	// Chat messages
-	float messagesHeight = height - 215; // Reserve space for input
+	float messagesHeight = height - 175; // Reserve space for input
 	ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, theme.frameRounding);
 	ImGui::BeginChild("ChatMessages", ImVec2(width - 40, messagesHeight), true);
 	{
@@ -1839,12 +1654,11 @@ void GameClient::drawChatPanel(float width, float height)
 				ImGui::TextColored(senderColor, "%s%s:", senderIcon.c_str(), msg.sender.c_str());
 			}
 
-			// Format timestamp
-			std::string timeStr = Utils::formatTimestamp(msg.timestamp);
-
-			// For each message in the group
 			if (startNewGroup)
 			{
+				// Format timestamp
+				std::string timeStr = Utils::formatTimestamp(msg.timestamp);
+				
 				// First message in group shows timestamp at the top
 				ImGui::TextColored(theme.textSecondary, "%s", timeStr.c_str());
 			}
@@ -1872,29 +1686,11 @@ void GameClient::drawChatPanel(float width, float height)
 
 	ImGui::Spacing();
 
-	// Chat input with styling
-	bool inputEnabled = (connectionState == ConnectionState::Connected);
-	if (!inputEnabled)
-	{
-		ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * 0.5f);
-	}
-	if (chatFocused && !ImGui::IsAnyItemActive() && inputEnabled)
-	{
-		ImGui::SetKeyboardFocusHere();
-	}
-
 	// Input text flags - use EnterReturnsTrue to capture Enter key
 	ImGuiInputTextFlags inputFlags = ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CtrlEnterForNewLine;
-	if (!inputEnabled)
-	{
-		inputFlags |= ImGuiInputTextFlags_ReadOnly;
-	}
-
-	// Support for command history
-	handleChatCommandHistory();
 
 	// Calculate dimensions for the multiline input
-	float inputHeight = 80.0f; // Default height for multiline input
+	float inputHeight = 40.0f; // Default height for multiline input
 	float buttonWidth = 100;
 	float buttonHeight = 40.0f;
 	float availableWidth = width - 40 - buttonWidth - ImGui::GetStyle().ItemSpacing.x;
@@ -1905,20 +1701,13 @@ void GameClient::drawChatPanel(float width, float height)
 	// Input field styling
 	ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(15, 12));
 	ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 15.0f);
+	ImGui::PushStyleColor(ImGuiCol_FrameBg, theme.bgInput);
 
-	if (chatFocused && inputEnabled)
-	{
-		ImGui::PushStyleColor(ImGuiCol_FrameBg, theme.bgInput);
-	}
-
-	// Chat multiline input field
+	// Chat multiline input field without history callback
 	ImGui::SetNextItemWidth(availableWidth);
 	bool enterPressed = ImGui::InputTextMultiline("##ChatInput", chatInputBuffer, IM_ARRAYSIZE(chatInputBuffer), ImVec2(availableWidth, inputHeight), inputFlags);
 
-	if (chatFocused && inputEnabled)
-	{
-		ImGui::PopStyleColor();
-	}
+	ImGui::PopStyleColor();
 
 	ImGui::SameLine();
 
@@ -1928,7 +1717,7 @@ void GameClient::drawChatPanel(float width, float height)
 
 	// Style for the send button
 	ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 25.0f);
-	bool sendClicked = ImGui::Button(ICON_LC_SEND " Send", ImVec2(buttonWidth, buttonHeight)) && inputEnabled;
+	bool sendClicked = ImGui::Button(ICON_LC_SEND " Send", ImVec2(buttonWidth, buttonHeight));
 	ImGui::PopStyleVar(3); // FramePadding, FrameRounding, FrameRounding for button
 
 	// Add a tooltip for the keyboard shortcut
@@ -1939,29 +1728,13 @@ void GameClient::drawChatPanel(float width, float height)
 
 	ImGui::EndGroup();
 
-	// Add a help text below the input
+	// Help text for chat input
 	ImGui::TextColored(theme.textSecondary, "Press Enter to send, Ctrl+Enter for new line");
 
-	if (!inputEnabled)
-	{
-		ImGui::PopStyleVar();
-	}
-
 	// Process chat message
-	if ((enterPressed || sendClicked) && inputEnabled)
+	if (enterPressed || sendClicked)
 	{
 		processChatInput();
-	}
-
-	// Handle resizing hint (optional - can be expanded)
-	ImVec2 inputPos = ImGui::GetItemRectMin();
-	ImVec2 inputSize = ImGui::GetItemRectSize();
-	bool isHoveringBottomEdge = ImGui::IsMouseHoveringRect(ImVec2(inputPos.x, inputPos.y + inputSize.y - 5), ImVec2(inputPos.x + inputSize.x, inputPos.y + inputSize.y), false);
-
-	if (isHoveringBottomEdge)
-	{
-		ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
-		// This is where you could add drag resizing logic
 	}
 
 	ImGui::EndChild();     // End ChatPanel
@@ -1995,6 +1768,28 @@ void GameClient::drawControlsPanel(float width, float height)
 	);
 	ImGui::Dummy(ImVec2(0, 10)); // Space after separator
 
+	// Theme selection
+	ImGui::TextColored(theme.textAccent, ICON_LC_PALETTE " THEME");
+	ImGui::SameLine();
+
+	// Theme selection combo box
+	if (ImGui::BeginCombo("##ThemeCombo", themeManager.getCurrentTheme().name.c_str()))
+	{
+		for (const auto& themeName: themeManager.getThemeNames())
+		{
+			bool isSelected = (themeName == themeManager.getCurrentTheme().name);
+			if (ImGui::Selectable(themeName.c_str(), isSelected))
+			{
+				themeManager.setTheme(themeName);
+			}
+			if (isSelected)
+			{
+				ImGui::SetItemDefaultFocus();
+			}
+		}
+		ImGui::EndCombo();
+	}
+
 	// Draw the controls UI with styling
 	drawNetworkOptionsUI(width, height);
 
@@ -2009,103 +1804,6 @@ void GameClient::drawNetworkOptionsUI(float width, float height)
 	// Network settings
 	ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(10, 8));
 	ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(10, 15));
-
-	{
-		// Position update rate
-		int updateRate = (int) positionUpdateRateMs;
-		if (ImGui::SliderInt(ICON_LC_WIFI " Update Rate (ms)", &updateRate, 50, 500))
-		{
-			positionUpdateRateMs = updateRate;
-		}
-		ImGui::SameLine();
-		ImGui::TextDisabled("(?)");
-		if (ImGui::IsItemHovered())
-		{
-			ImGui::BeginTooltip();
-			ImGui::Text("Controls how often position updates are sent.\nLower values = more responsive but higher bandwidth.");
-			ImGui::EndTooltip();
-		}
-		// Movement threshold
-		float threshold = movementThreshold;
-		if (ImGui::SliderFloat(ICON_LC_MAP_PIN " Movement Threshold", &threshold, 0.01f, 1.0f, "%.2f"))
-		{
-			movementThreshold = threshold;
-		}
-		ImGui::SameLine();
-		ImGui::TextDisabled("(?)");
-		if (ImGui::IsItemHovered())
-		{
-			ImGui::BeginTooltip();
-			ImGui::Text("Minimum distance to move before sending a position update.\nHigher values = less updates but less smooth movement.");
-			ImGui::EndTooltip();
-		}
-		// Delta compression
-		bool useDelta = useCompressedUpdates;
-		if (ImGui::Checkbox(ICON_LC_COMMAND " Use Delta Compression", &useDelta))
-		{
-			useCompressedUpdates = useDelta;
-		}
-		ImGui::SameLine();
-		ImGui::TextDisabled("(?)");
-		if (ImGui::IsItemHovered())
-		{
-			ImGui::BeginTooltip();
-			ImGui::Text("Only send coordinates that changed significantly.\nReduces bandwidth at the cost of slightly more CPU.");
-			ImGui::EndTooltip();
-		}
-		// Stats display
-		if (showStats)
-		{
-			ImDrawList* drawList = ImGui::GetWindowDrawList();
-			ImVec2 sepMin = ImGui::GetCursorScreenPos();
-			ImVec2 sepMax = ImVec2(sepMin.x + width - 40, sepMin.y + 1);
-			drawList->AddRectFilledMultiColor(sepMin,
-			        sepMax,
-			        ImGui::GetColorU32(theme.gradientStart), // Left
-			        ImGui::GetColorU32(theme.gradientEnd),   // Right
-			        ImGui::GetColorU32(theme.gradientEnd),   // Right
-			        ImGui::GetColorU32(theme.gradientStart)  // Left
-			);
-			ImGui::Dummy(ImVec2(0, 10)); // Space after separator
-			ImGui::Text(ICON_LC_CHART_SPLINE " Bandwidth Stats");
-			ImGui::Text("Position Updates: %d/sec", positionUpdateRateMs > 0 ? (1000 / positionUpdateRateMs) : 0);
-			// Calculate average bandwidth for position updates
-			float updatesPerSecond = 1000.0f / positionUpdateRateMs;
-			float bytesPerUpdate = useCompressedUpdates ? 12.0f : 28.0f; // Estimated average sizes
-			float bandwidthBps = updatesPerSecond * bytesPerUpdate;
-			ImGui::Text(ICON_LC_TRENDING_UP " Estimated Position Bandwidth: %.2f KB/s", bandwidthBps / 1024.0f);
-		}
-	}
-
-	ImGui::Spacing();
-	ImGui::Dummy(ImVec2(0, 10));
-
-	// Section: Display Options
-	{
-		ImGui::TextColored(theme.textAccent, ICON_LC_MONITOR " Display Options");
-		ImDrawList* drawList = ImGui::GetWindowDrawList();
-		ImVec2 sepMin = ImGui::GetCursorScreenPos();
-		ImVec2 sepMax = ImVec2(sepMin.x + width - 40, sepMin.y + 1);
-		drawList->AddRectFilledMultiColor(sepMin,
-		        sepMax,
-		        ImGui::GetColorU32(theme.gradientStart), // Left
-		        ImGui::GetColorU32(theme.gradientEnd),   // Right
-		        ImGui::GetColorU32(theme.gradientEnd),   // Right
-		        ImGui::GetColorU32(theme.gradientStart)  // Left
-		);
-		ImGui::Dummy(ImVec2(0, 10)); // Space after separator
-		ImGui::Spacing();
-
-		// Show Stats Checkbox
-		ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 3.0f);
-		ImGui::Checkbox("Show Network Statistics", &showStats);
-
-		// Other display options can be added here
-		ImGui::PopStyleVar();
-	}
-
-	ImGui::Spacing();
-	ImGui::Dummy(ImVec2(0, 10));
 
 	// Section: Actions
 	{
@@ -2156,10 +1854,96 @@ void GameClient::drawUI()
 
 	// Disable rounding for full window
 	ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
-
 	ImGui::Begin("MMO Client", nullptr, window_flags);
-
 	ImGui::PopStyleVar();
+
+	// Handle game controls when connected and not focusing UI inputs
+	if (connectionState == ConnectionState::Connected && !ImGui::GetIO().WantTextInput)
+	{
+		ImGuiIO& io = ImGui::GetIO();
+
+		// Get elapsed time since last frame for smooth movement
+		time_t currentTime = time(0);
+		float deltaTime = (currentTime - lastUpdateTime) / 1000.0f; // Convert to seconds
+		lastUpdateTime = currentTime;
+
+		// Use deltaTime for smooth movement regardless of frame rate
+		// Cap to reasonable values to prevent extreme movement on lag spikes
+		if (deltaTime > 0.1f)
+			deltaTime = 0.1f;
+		const float BASE_SPEED = 5.0f; // Units per second
+		const float MOVE_SPEED = BASE_SPEED * deltaTime;
+
+		// WASD movement on XZ plane - using ImGui's key states
+		if (ImGui::IsKeyDown(ImGuiKey_W))
+			myPosition.z += MOVE_SPEED;
+		if (ImGui::IsKeyDown(ImGuiKey_S))
+			myPosition.z -= MOVE_SPEED;
+		if (ImGui::IsKeyDown(ImGuiKey_A))
+			myPosition.x -= MOVE_SPEED;
+		if (ImGui::IsKeyDown(ImGuiKey_D))
+			myPosition.x += MOVE_SPEED;
+
+		// QE for vertical movement on Y axis
+		if (ImGui::IsKeyDown(ImGuiKey_Q))
+			myPosition.y += MOVE_SPEED;
+		if (ImGui::IsKeyDown(ImGuiKey_E))
+			myPosition.y -= MOVE_SPEED;
+
+		// Global keyboard shortcuts
+		if (ImGui::IsKeyPressed(ImGuiKey_F1))
+		{
+			showDebug = !showDebug;
+			logger.setLogLevel(LogLevel::DEBUG);
+			addChatMessage("System", std::string("Debug mode ") + (showDebug ? "enabled" : "disabled"));
+		}
+
+		if (ImGui::IsKeyPressed(ImGuiKey_F3))
+		{
+			showStats = !showStats;
+			addChatMessage("System", std::string("Network stats ") + (showStats ? "enabled" : "disabled"));
+		}
+
+		// ESC to exit
+		if (ImGui::IsKeyPressed(ImGuiKey_Escape))
+		{
+			shouldExit = true;
+		}
+
+		// Shortcut keys for common commands
+		if (ImGui::IsKeyPressed(ImGuiKey_P) && (io.KeyCtrl || io.KeyShift))
+		{
+			// Ctrl+P or Shift+P for player list
+			processChatCommand("/players");
+		}
+
+		if (ImGui::IsKeyPressed(ImGuiKey_L) && io.KeyCtrl)
+		{
+			// Ctrl+L to clear chat
+			processChatCommand("/clear");
+		}
+
+		if (ImGui::IsKeyPressed(ImGuiKey_R) && io.KeyCtrl)
+		{
+			// Ctrl+R to attempt reconnection
+			processChatCommand("/reconnect");
+		}
+
+		// Start chat with "/"
+		if (ImGui::IsKeyPressed(ImGuiKey_Slash))
+		{
+			// Focus chat input and add / character
+			chatInputBuffer[0] = '/';
+			chatInputBuffer[1] = '\0';
+			ImGui::SetKeyboardFocusHere();
+		}
+	}
+
+	// ESC in login screen should exit
+	if (connectionState == ConnectionState::LoginScreen && ImGui::IsKeyPressed(ImGuiKey_Escape))
+	{
+		shouldExit = true;
+	}
 
 	if (showDebug && threadManager)
 	{
