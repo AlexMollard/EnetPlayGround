@@ -19,7 +19,7 @@
 #endif
 
 PluginManager::PluginManager(GameServer* server)
-      : server(server), threadManager(nullptr)
+      : server(server)
 {
 }
 
@@ -101,7 +101,7 @@ bool PluginManager::loadPlugin(const std::string& path)
 		// Set up function pointers using std::function (ensure ServerFunctions struct is updated)
 		functions.broadcastSystemMessage = [this](const std::string& msg) { server->broadcastSystemMessage(msg); };
 
-		functions.sendSystemMessage = [this](const Player& player, const std::string& msg) { server->sendSystemMessage(player, msg); };
+		functions.sendSystemMessage = [this](Player& player, const std::string& msg) { server->sendSystemMessage(player, msg); };
 
 		// Make sure this is actually defined in your ServerFunctions struct
 		functions.getLogger = [this]() -> Logger* { return &server->logger; };
@@ -137,7 +137,7 @@ bool PluginManager::loadPlugin(const std::string& path)
 		}
 
 		// Check if plugin already exists
-		if (plugins.empty() || plugins.find(pluginName) != plugins.end())
+		if (plugins.find(pluginName) != plugins.end())
 		{
 			releaseUniqueLock();
 			// Clean up as in original
@@ -291,25 +291,8 @@ bool PluginManager::reloadPlugin(const std::string& name)
 		return false;
 	}
 
-	if (threadManager)
-	{
-		std::promise<void> delayPromise;
-		auto delayFuture = delayPromise.get_future();
-
-		threadManager->scheduleTask(
-		        [&delayPromise]()
-		        {
-			        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-			        delayPromise.set_value();
-		        });
-
-		delayFuture.wait();
-	}
-	else
-	{
-		// Fallback to direct sleep if threadManager isn't available
-		std::this_thread::sleep_for(std::chrono::milliseconds(100));
-	}
+	// Small delay to ensure the DLL/shared library is fully unloaded
+	std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
 	return loadPlugin(path);
 }
@@ -405,28 +388,11 @@ void PluginManager::checkForPluginUpdates()
 	{
 		server->logger.info("Auto-reloading modified plugin: " + name);
 
-		// Use ThreadManager if available, otherwise do it directly
-		if (threadManager)
+		if (unloadPlugin(name))
 		{
-			threadManager->scheduleTask(
-			        [this, name, path]()
-			        {
-				        if (unloadPlugin(name))
-				        {
-					        // Small delay to ensure the DLL/shared library is fully unloaded
-					        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-					        loadPlugin(path);
-				        }
-			        });
-		}
-		else
-		{
-			if (unloadPlugin(name))
-			{
-				// Small delay to ensure the DLL/shared library is fully unloaded
-				std::this_thread::sleep_for(std::chrono::milliseconds(100));
-				loadPlugin(path);
-			}
+			// Small delay to ensure the DLL/shared library is fully unloaded
+			std::this_thread::sleep_for(std::chrono::milliseconds(100));
+			loadPlugin(path);
 		}
 	}
 }
@@ -590,17 +556,17 @@ void PluginManager::dispatchServerTick()
 	}
 }
 
-bool PluginManager::dispatchPlayerCommand(const Player& player, const std::string& command, const std::vector<std::string>& args)
+bool PluginManager::dispatchPlayerCommand(Player& player, const std::string& command, const std::vector<std::string>& args)
 {
 	auto pluginInstances = getPluginInstancesCopy();
-	bool commandHandled = false;
+
 	for (const auto& [name, plugin]: pluginInstances)
 	{
 		try
 		{
 			if (plugin->onPlayerCommand(player, command, args))
 			{
-				commandHandled = true;
+				return true; // Command handled
 			}
 		}
 		catch (const std::exception& e)
@@ -609,7 +575,7 @@ bool PluginManager::dispatchPlayerCommand(const Player& player, const std::strin
 		}
 	}
 
-	return commandHandled;
+	return false; // No plugin handled the command
 }
 
 void PluginManager::dispatchChatMessage(const std::string& sender, const std::string& message)

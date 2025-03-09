@@ -3,6 +3,7 @@
 #include <imgui.h>
 #include <string>
 #include <unordered_map>
+#include <Logger.h>
 
 // Theme struct to hold all the color and style settings
 struct UITheme
@@ -71,7 +72,7 @@ struct UITheme
 class ThemeManager
 {
 public:
-	ThemeManager();
+	ThemeManager(Logger& logger, bool isDebuggerAttached);
 	~ThemeManager() = default;
 
 	// Apply the current theme to ImGui
@@ -96,6 +97,14 @@ private:
 	std::unordered_map<std::string, UITheme> themes;
 	UITheme currentTheme;
 
+	bool isDebuggerAttached = false;
+
 	// Create default themes
 	void createDefaultThemes();
+
+	void saveTheme(const std::string& filename);
+	void loadTheme(const std::string& filename);
+	void loadThemeFromFile(const std::string& filename);
+
+	Logger& logger;
 };

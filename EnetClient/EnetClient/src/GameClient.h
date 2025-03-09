@@ -1,19 +1,17 @@
 #pragma once
 
 // Standard library includes
+#include <atomic>
+#include <corecrt.h>
 #include <deque>
+#include <thread>
 #include <windows.h>
-#include <winsock2.h>
 
 // Project includes
-#include <atomic>
-#include <thread>
-
 #include "AuthManager.h"
 #include "Logger.h"
 #include "NetworkManager.h"
 #include "ThemeManager.h"
-#include <corecrt.h>
 
 //=============================================================================
 // DATA STRUCTURES
@@ -90,10 +88,9 @@ public:
 
 	/**
      * Constructor
-     * @param playerName Optional player name
-     * @param password Optional password
+     * @param isDebuggerAttached
      */
-	GameClient();
+	GameClient(bool isDebuggerAttached);
 
 	/**
      * Destructor
@@ -207,7 +204,7 @@ private:
 	// Utility objects
 	HANDLE consoleHandle;
 
-	// Themes 
+	// Themes
 	ThemeManager themeManager;
 
 	// Thread management
@@ -279,7 +276,7 @@ private:
 
 	/**
 	 * Gets the current stats of the thread manager
-	 */ 
+	 */
 	std::string getThreadStats() const;
 
 	/**

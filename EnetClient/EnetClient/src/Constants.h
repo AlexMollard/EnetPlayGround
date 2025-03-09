@@ -1,6 +1,7 @@
 #pragma once
 
 #define VERSION "0.1.0"
+#define GAME_NAME "MMO CLIENT"
 #define CREDENTIALS_FILE "client_credentials.dat"
 #define DEBUG_LOG_FILE "client_debug.log"
 #define MAX_HISTORY_COMMANDS 20

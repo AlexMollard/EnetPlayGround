@@ -18,8 +18,8 @@
 #include "Utils.h"
 
 // Constructor
-GameClient::GameClient()
-      : lastUpdateTime(time(0))
+GameClient::GameClient(bool isDebuggerAttached)
+      : lastUpdateTime(time(0)), themeManager(logger, isDebuggerAttached)
 {
 	// Set up console
 	consoleHandle = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -126,13 +126,10 @@ void GameClient::disconnect(bool showMessage)
 void GameClient::handleServerDisconnection()
 {
 	connectionState = ConnectionState::LoginScreen;
-	addChatMessage("System", "Lost connection to server");
 
 	// Try to reconnect if not exiting
 	if (!shouldExit && !reconnecting && autoLogin)
 	{
-		addChatMessage("System", "Attempting to reconnect...");
-
 		// Use thread manager for reconnection attempt
 		threadManager->scheduleNetworkTask([this]() { networkManager->reconnectToServer(); });
 	}
@@ -231,7 +228,7 @@ void GameClient::processChatCommand(const std::string& command)
 		}
 		else
 		{
-			addChatMessage("System", "Not connected to server. Cannot process command.");
+			logger.warning("Not connected to server or not authenticated, cannot send command: " + command);
 		}
 	}
 	else
@@ -253,7 +250,7 @@ void GameClient::handlePacket(const ENetPacket* packet)
 		if (response.substr(0, 7) == "SUCCESS")
 		{
 			// Registration successful
-			addChatMessage("System", "Registration successful!");
+			logger.info("Registration successful!");
 			connectionState = ConnectionState::LoginScreen;
 
 			// Auto-fill login credentials
@@ -803,9 +800,6 @@ void GameClient::signOut()
 	// Return to login screen
 	connectionState = ConnectionState::LoginScreen;
 
-	// Add a system message
-	addChatMessage("System", "You have been signed out");
-
 	logger.debug("User signed out");
 
 	clearChatMessages();
@@ -815,7 +809,7 @@ void GameClient::drawLoginScreen()
 {
 	// Center the login window on screen
 	ImGuiIO& io = ImGui::GetIO();
-	ImVec2 windowSize = ImVec2(450, 425);
+	ImVec2 windowSize = ImVec2(475, 450);
 	ImVec2 windowPos = ImVec2((io.DisplaySize.x - windowSize.x) * 0.5f, (io.DisplaySize.y - windowSize.y) * 0.5f);
 
 	// Set window position and size
@@ -978,7 +972,7 @@ void GameClient::drawRegisterScreen()
 {
 	// Center the register window on screen
 	ImGuiIO& io = ImGui::GetIO();
-	ImVec2 windowSize = ImVec2(450, 425);
+	ImVec2 windowSize = ImVec2(475, 450);
 	ImVec2 windowPos = ImVec2((io.DisplaySize.x - windowSize.x) * 0.5f, (io.DisplaySize.y - windowSize.y) * 0.5f);
 
 	// Set window position and size
@@ -1111,7 +1105,7 @@ void GameClient::drawRegisterScreen()
 
 void GameClient::drawConnectedUI()
 {
-	// Header with gradient
+	// Header
 	drawHeader();
 
 	// Content area with panels
@@ -1161,88 +1155,20 @@ void GameClient::drawConnectedUI()
 
 void GameClient::drawHeader()
 {
-	// gradient header
-	ImDrawList* drawList = ImGui::GetWindowDrawList();
-	ImVec2 headerMin = ImGui::GetCursorScreenPos();
-	ImVec2 headerMax = ImVec2(headerMin.x + ImGui::GetContentRegionAvail().x - 10, headerMin.y + 80);
-
 	// Content container
-	ImGui::BeginChild("HeaderContent", ImVec2(ImGui::GetContentRegionAvail().x, 80), false, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+	ImGui::BeginChild("HeaderContent", ImVec2(ImGui::GetContentRegionAvail().x, 80), true, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
 
 	// Left side - Title and version
 	ImGui::PushFont(ImGui::GetIO().Fonts->Fonts[1]); // Larger font
-	ImGui::SetCursorPos(ImVec2(20, 15));
-	ImGui::Text("MMO CLIENT");
+	ImGui::SetCursorPosY(15);
+	ImGui::SetCursorPosX((ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize(GAME_NAME).x) * 0.5f);
+	ImGui::TextColored(themeManager.getCurrentTheme().textAccent, "MMO CLIENT");
 
 	// Player name centered in the header
 	ImGui::SetCursorPosX((ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize(myPlayerName.c_str()).x) * 0.5f);
 	ImGui::TextColored(themeManager.getCurrentTheme().textSecondary, "%s", myPlayerName.c_str(), myPlayerId);
 	ImGui::PopFont();
 
-	ImGui::SetCursorPos(ImVec2(20, 50));
-	ImGui::TextColored(themeManager.getCurrentTheme().textSecondary, "v%s", VERSION);
-
-	// Right side - Status with badge
-	float statusWidth = 180;
-	ImVec2 statusPos = ImVec2(ImGui::GetContentRegionAvail().x - statusWidth / 2 - 30, 10);
-
-	// Status indicator
-	ImVec4 statusColor;
-	const char* statusText;
-
-	if (connectionInProgress)
-	{
-		statusColor = themeManager.getCurrentTheme().statusConnecting; // Amber
-		statusText = "CONNECTING...";
-	}
-	else
-	{
-		switch (connectionState)
-		{
-			case ConnectionState::Connecting:
-				statusColor = themeManager.getCurrentTheme().statusConnecting; // Amber
-				statusText = "CONNECTING...";
-				break;
-			case ConnectionState::Authenticating:
-				statusColor = themeManager.getCurrentTheme().statusConnecting; // Amber
-				statusText = "AUTHENTICATING...";
-				break;
-			case ConnectionState::Connected:
-				statusColor = themeManager.getCurrentTheme().statusOnline; // Green
-				statusText = "CONNECTED";
-				break;
-			default:
-				statusColor = themeManager.getCurrentTheme().statusOffline; // Red
-				statusText = "DISCONNECTED";
-				break;
-		}
-	}
-
-	// badge with pill shape
-	ImGui::SetCursorPos(statusPos);
-	ImVec2 badgeMin = ImGui::GetCursorScreenPos();
-	ImVec2 textSize = ImGui::CalcTextSize(statusText);
-	ImVec2 badgeMax = ImVec2(badgeMin.x + textSize.x + 20, badgeMin.y + textSize.y + 10);
-	float badgeRounding = (badgeMax.y - badgeMin.y) / 2.0f;
-
-	drawList->AddRectFilled(badgeMin, badgeMax, ImGui::GetColorU32(statusColor), badgeRounding);
-
-	// Center text in badge
-	ImGui::SetCursorPos(ImVec2(statusPos.x + 10, statusPos.y + 5));
-	ImGui::TextColored(themeManager.getCurrentTheme().textPrimary, "%s", statusText);
-
-	// Sign Out button with hover effect
-	float buttonWidth = 120;
-	float buttonHeight = 30;
-	ImGui::SetCursorPos(ImVec2(ImGui::GetContentRegionAvail().x - buttonWidth - 15, 45));
-	ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 15.0f);
-
-	if (ImGui::Button(ICON_LC_LOG_OUT " Sign Out", ImVec2(buttonWidth, buttonHeight)))
-	{
-		signOut();
-	}
-
-	ImGui::PopStyleVar();
 	ImGui::EndChild();
 }
 
@@ -1830,8 +1756,14 @@ void GameClient::drawNetworkOptionsUI(float width, float height)
 			clearChatMessages();
 		}
 
+		// Sign out button
+		if (ImGui::Button(ICON_LC_LOG_OUT " Sign Out", ImVec2(-1, 35)))
+		{
+			signOut();
+		}
+
 		// Exit button
-		if (ImGui::Button(ICON_LC_LOG_OUT " Exit Application", ImVec2(-1, 35)))
+		if (ImGui::Button(ICON_LC_CIRCLE_X " Exit Application", ImVec2(-1, 35)))
 		{
 			shouldExit = true;
 		}

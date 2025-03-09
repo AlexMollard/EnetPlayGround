@@ -7,7 +7,6 @@
 
 #include "GameClient.h"
 #include "IconsLucide.h"
-#include "Logger.h"
 
 constexpr float BASE_FONT_SIZE = 16.0f;
 
@@ -48,7 +47,7 @@ int main(int argc, char* argv[])
 	params.imGuiWindowParams.showStatusBar = false;
 
 	// Create game client - pass command line parameters to constructor
-	std::shared_ptr<GameClient> client = std::make_shared<GameClient>();
+	std::shared_ptr<GameClient> client = std::make_shared<GameClient>(IsDebuggerPresent());
 
 	// Setup font loading callback
 	params.callbacks.LoadAdditionalFonts = [&client]()

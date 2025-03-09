@@ -65,11 +65,11 @@ The primary focus of this sandbox is to test various networking approaches, unde
         <p align="center"><i>Server console displaying connected clients and active plugins</i></p>
       </td>
       <td width="33%">
-        <img src="docs/SecondLogin.png" alt="Login Interface" width="100%">
+        <img src="docs/Login1.0.png" alt="Login Interface" width="100%">
         <p align="center"><i>Client authentication interface</i></p>
       </td>
       <td width="33%">
-        <img src="docs/ThirdClient.png" alt="Client Interface" width="100%">
+        <img src="docs/Client1.0.png" alt="Client Interface" width="100%">
         <p align="center"><i>Client interface with inter-client communication</i></p>
       </td>
     </tr>
@@ -123,6 +123,7 @@ The primary focus of this sandbox is to test various networking approaches, unde
    .\vcpkg install enet
    .\vcpkg install hello-imgui
    .\vcpkg install libmysql
+   .\vcpkg install nlohmann-json
    ```
 
 4. **🔨 Build the projects**
