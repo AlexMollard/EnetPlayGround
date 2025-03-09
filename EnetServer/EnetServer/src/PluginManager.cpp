@@ -101,7 +101,7 @@ bool PluginManager::loadPlugin(const std::string& path)
 		// Set up function pointers using std::function (ensure ServerFunctions struct is updated)
 		functions.broadcastSystemMessage = [this](const std::string& msg) { server->broadcastSystemMessage(msg); };
 
-		functions.sendSystemMessage = [this](Player& player, const std::string& msg) { server->sendSystemMessage(player, msg); };
+		functions.sendSystemMessage = [this](const Player& player, const std::string& msg) { server->sendSystemMessage(player, msg); };
 
 		// Make sure this is actually defined in your ServerFunctions struct
 		functions.getLogger = [this]() -> Logger* { return &server->logger; };
@@ -136,14 +136,13 @@ bool PluginManager::loadPlugin(const std::string& path)
 			return false;
 		}
 
-		// Check if plugin already exists
-		if (plugins.find(pluginName) != plugins.end())
-		{
-			releaseUniqueLock();
-			// Clean up as in original
-			return false;
-		}
-
+        // Check if plugin already exists
+        if (!plugins.empty() && plugins.find(pluginName) != plugins.end())
+        {
+            releaseUniqueLock();
+            return false;
+        }
+	
 		// Get last modified time of the file
 		std::filesystem::file_time_type lastModified;
 		try
@@ -556,7 +555,7 @@ void PluginManager::dispatchServerTick()
 	}
 }
 
-bool PluginManager::dispatchPlayerCommand(Player& player, const std::string& command, const std::vector<std::string>& args)
+bool PluginManager::dispatchPlayerCommand(const Player& player, const std::string& command, const std::vector<std::string>& args)
 {
 	auto pluginInstances = getPluginInstancesCopy();
 

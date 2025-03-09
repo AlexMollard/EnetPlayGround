@@ -820,18 +820,18 @@ void GameClient::drawLoginScreen()
 	ImGui::Begin("Login", nullptr, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove);
 
 	// Calculate content width for centering
-	const float contentWidth = ImGui::GetContentRegionAvail().x;
+	const float contentWidth = windowSize.x;
 
 	// Game title with proper centering
 	ImGui::PushFont(ImGui::GetIO().Fonts->Fonts[0]); // Default font
 
-	// Center the title text properly
-	ImVec2 titleSize = ImGui::CalcTextSize("MMO CLIENT");
+	// Center the title text
+	ImVec2 titleSize = ImGui::CalcTextSize(GAME_NAME);
 	ImGui::SetCursorPosX((contentWidth - titleSize.x) * 0.5f);
-	ImGui::Text("MMO CLIENT");
+	ImGui::Text(GAME_NAME);
 	ImGui::PopFont();
 
-	// Center version text properly
+	// Center version text
 	char versionText[64];
 	snprintf(versionText, sizeof(versionText), "Version %s", VERSION);
 	ImVec2 versionSize = ImGui::CalcTextSize(versionText);
@@ -869,40 +869,37 @@ void GameClient::drawLoginScreen()
 	}
 	else
 	{
-		float labelWidth = 0.0f; // Width for labels
-
-		// Server selection with consistent alignment and icon
+		// Server selection
 		ImGui::AlignTextToFramePadding();
 		ImGui::Text(ICON_LC_SERVER " Server:");
 		ImGui::SameLine();
-		labelWidth = ImGui::GetCursorPosX();
-		ImGui::SetNextItemWidth(contentWidth - labelWidth);
+		ImGui::SetNextItemWidth(-1);
 		char serverBuf[128];
 		strncpy_s(serverBuf, networkManager->getServerAddress().c_str(), sizeof(serverBuf) - 1);
 		if (ImGui::InputText("##Server", serverBuf, sizeof(serverBuf)))
 		{
 			networkManager->setServerAddress(serverBuf);
 		}
-		ImGui::Spacing();
 
-		// Username field with consistent alignment and icon
+		ImGui::Dummy(ImVec2(0.0f, 4.0f));
+
+		// Username field
 		ImGui::AlignTextToFramePadding();
 		ImGui::Text(ICON_LC_USER " Username:");
 		ImGui::SameLine();
-		labelWidth = ImGui::GetCursorPosX();
-		ImGui::SetNextItemWidth(contentWidth - labelWidth);
+		ImGui::SetNextItemWidth(-1);
 		ImGui::InputText("##Username", loginUsernameBuffer, sizeof(loginUsernameBuffer));
 
-		// Password field with better alignment and icon
+		// Password field
 		ImGui::AlignTextToFramePadding();
-		ImGui::Text(ICON_LC_COMMAND " Password:");
+		ImGui::Text(ICON_LC_COMMAND " Password: ");
 		ImGui::SameLine();
-		labelWidth = ImGui::GetCursorPosX();
+		float labelWidth = ImGui::GetCursorPosX();
 		ImGuiInputTextFlags passwordFlags = showPassword ? 0 : ImGuiInputTextFlags_Password;
-		ImGui::SetNextItemWidth(contentWidth - labelWidth - 80);
+		ImGui::SetNextItemWidth(contentWidth - labelWidth - 120);
 		ImGui::InputText("##Password", loginPasswordBuffer, sizeof(loginPasswordBuffer), passwordFlags);
 		ImGui::SameLine();
-		if (ImGui::Button(showPassword ? ICON_LC_EYE_OFF " Hide" : ICON_LC_EYE " Show", ImVec2(70, 0)))
+		if (ImGui::Button(showPassword ? ICON_LC_EYE_OFF " Hide" : ICON_LC_EYE " Show", ImVec2(90, 0)))
 		{
 			showPassword = !showPassword;
 		}
@@ -983,7 +980,7 @@ void GameClient::drawRegisterScreen()
 	ImGui::Begin("Register", nullptr, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove);
 
 	// Calculate content width for centering
-	const float contentWidth = ImGui::GetContentRegionAvail().x;
+	const float contentWidth = windowSize.x;
 
 	// Game title with proper centering
 	ImGui::PushFont(ImGui::GetIO().Fonts->Fonts[0]); // Default font
@@ -1005,40 +1002,37 @@ void GameClient::drawRegisterScreen()
 	ImGui::Separator();
 	ImGui::Spacing();
 
-	float labelWidth = 0.0f; // Width for labels
-
-	// Server information
+	// Server selection
 	ImGui::AlignTextToFramePadding();
 	ImGui::Text(ICON_LC_SERVER " Server:");
 	ImGui::SameLine();
-	labelWidth = ImGui::GetCursorPosX();
-	ImGui::SetNextItemWidth(contentWidth - labelWidth);
+	ImGui::SetNextItemWidth(-1);
 	char serverBuf[128];
 	strncpy_s(serverBuf, networkManager->getServerAddress().c_str(), sizeof(serverBuf) - 1);
-	if (ImGui::InputText("##RegServer", serverBuf, sizeof(serverBuf)))
+	if (ImGui::InputText("##Server", serverBuf, sizeof(serverBuf)))
 	{
 		networkManager->setServerAddress(serverBuf);
 	}
-	ImGui::Spacing();
+
+	ImGui::Dummy(ImVec2(0.0f, 4.0f));
 
 	// Username field
 	ImGui::AlignTextToFramePadding();
 	ImGui::Text(ICON_LC_USER " Username:");
 	ImGui::SameLine();
-	labelWidth = ImGui::GetCursorPosX();
-	ImGui::SetNextItemWidth(contentWidth - labelWidth);
-	ImGui::InputText("##RegUsername", registerUsernameBuffer, sizeof(registerUsernameBuffer));
+	ImGui::SetNextItemWidth(-1);
+	ImGui::InputText("##Username", loginUsernameBuffer, sizeof(loginUsernameBuffer));
 
 	// Password field
 	ImGui::AlignTextToFramePadding();
-	ImGui::Text(ICON_LC_COMMAND " Password:");
+	ImGui::Text(ICON_LC_COMMAND " Password: ");
 	ImGui::SameLine();
-	labelWidth = ImGui::GetCursorPosX();
-	ImGui::SetNextItemWidth(contentWidth - labelWidth - 80);
+	float labelWidth = ImGui::GetCursorPosX();
 	ImGuiInputTextFlags passwordFlags = showPassword ? 0 : ImGuiInputTextFlags_Password;
-	ImGui::InputText("##RegPassword", registerPasswordBuffer, sizeof(registerPasswordBuffer), passwordFlags);
+	ImGui::SetNextItemWidth(contentWidth - labelWidth - 120);
+	ImGui::InputText("##Password", loginPasswordBuffer, sizeof(loginPasswordBuffer), passwordFlags);
 	ImGui::SameLine();
-	if (ImGui::Button(showPassword ? ICON_LC_EYE_OFF " Hide" : ICON_LC_EYE " Show", ImVec2(70, 0)))
+	if (ImGui::Button(showPassword ? ICON_LC_EYE_OFF " Hide" : ICON_LC_EYE " Show", ImVec2(90, 0)))
 	{
 		showPassword = !showPassword;
 	}
@@ -1047,8 +1041,7 @@ void GameClient::drawRegisterScreen()
 	ImGui::AlignTextToFramePadding();
 	ImGui::Text(ICON_LC_CHECK " Confirm:");
 	ImGui::SameLine();
-	labelWidth = ImGui::GetCursorPosX();
-	ImGui::SetNextItemWidth(contentWidth - labelWidth);
+	ImGui::SetNextItemWidth(-1);
 	ImGui::InputText("##RegConfirmPassword", registerConfirmPasswordBuffer, sizeof(registerConfirmPasswordBuffer), passwordFlags);
 
 	ImGui::Spacing();
@@ -1080,7 +1073,7 @@ void GameClient::drawRegisterScreen()
 	}
 
 	// Register button
-	const float buttonWidth = 120.0f;
+	float buttonWidth = 120.0f;
 	ImGui::SetCursorPosX((contentWidth - buttonWidth) * 0.5f);
 	if (ImGui::Button(ICON_LC_USER_PLUS " Register", ImVec2(buttonWidth, 30)))
 	{
@@ -1090,11 +1083,9 @@ void GameClient::drawRegisterScreen()
 	ImGui::Spacing();
 
 	// Back to login link
-	const char* backText = ICON_LC_ARROW_LEFT " Back to Login";
-	ImVec2 backSize = ImGui::CalcTextSize(backText);
-	ImGui::SetCursorPosX((contentWidth - backSize.x) * 0.5f);
-
-	if (ImGui::Button(backText))
+	buttonWidth *= 1.15f;
+	ImGui::SetCursorPosX((contentWidth - buttonWidth) * 0.5f);
+	if (ImGui::Button(ICON_LC_ARROW_LEFT " Back to Login", ImVec2(buttonWidth, 30)))
 	{
 		connectionState = ConnectionState::LoginScreen;
 		registerErrorMessage.clear();
@@ -1162,7 +1153,7 @@ void GameClient::drawHeader()
 	ImGui::PushFont(ImGui::GetIO().Fonts->Fonts[1]); // Larger font
 	ImGui::SetCursorPosY(15);
 	ImGui::SetCursorPosX((ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize(GAME_NAME).x) * 0.5f);
-	ImGui::TextColored(themeManager.getCurrentTheme().textAccent, "MMO CLIENT");
+	ImGui::TextColored(themeManager.getCurrentTheme().textAccent, GAME_NAME);
 
 	// Player name centered in the header
 	ImGui::SetCursorPosX((ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize(myPlayerName.c_str()).x) * 0.5f);
@@ -1584,7 +1575,7 @@ void GameClient::drawChatPanel(float width, float height)
 			{
 				// Format timestamp
 				std::string timeStr = Utils::formatTimestamp(msg.timestamp);
-				
+
 				// First message in group shows timestamp at the top
 				ImGui::TextColored(theme.textSecondary, "%s", timeStr.c_str());
 			}
@@ -1786,7 +1777,7 @@ void GameClient::drawUI()
 
 	// Disable rounding for full window
 	ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
-	ImGui::Begin("MMO Client", nullptr, window_flags);
+	ImGui::Begin(GAME_NAME, nullptr, window_flags);
 	ImGui::PopStyleVar();
 
 	// Handle game controls when connected and not focusing UI inputs
