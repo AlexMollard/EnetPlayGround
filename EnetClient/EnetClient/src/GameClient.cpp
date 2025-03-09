@@ -487,6 +487,8 @@ void GameClient::parseWorldState(const std::string& stateData)
 // Add a chat message
 void GameClient::addChatMessage(const std::string& sender, const std::string& content)
 {
+	std::lock_guard<std::mutex> guard(chatMutex);
+
 	ChatMessage msg;
 	msg.sender = sender;
 	msg.content = content;
