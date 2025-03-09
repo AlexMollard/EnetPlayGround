@@ -14,7 +14,7 @@ ThemeManager::ThemeManager(Logger& logger, bool isDebuggerAttached)
 	loadTheme("current_theme.json");
 	if (themes.find(currentTheme.name) == themes.end())
 	{
-		logger.info("No default theme json was found");
+		logger.warning("No default theme json was found");
 		currentTheme = themes["Dark"];
 	}
 }
@@ -34,7 +34,7 @@ void ThemeManager::createDefaultThemes()
 		{
 			if (entry.path().extension() == ".json")
 			{
-				logger.debug("Found json at: " + entry.path().string());
+				//logger.debug("Found json at: " + entry.path().string());
 				loadThemeFromFile(entry.path().string());
 			}
 		}
@@ -47,7 +47,7 @@ void ThemeManager::createDefaultThemes()
 
 void ThemeManager::loadThemeFromFile(const std::string& filename)
 {
-	logger.info("Loading theme from file: " + filename);
+	//logger.info("Loading theme from file: " + filename);
 	std::ifstream file(filename);
 	if (file.is_open())
 	{
@@ -167,7 +167,7 @@ void ThemeManager::saveTheme(const std::string& filename)
 
 void ThemeManager::loadTheme(const std::string& filename)
 {
-	logger.debug("Loading theme: " + filename);
+	//logger.debug("Loading theme: " + filename);
 	std::ifstream file(filename);
 	if (file.is_open())
 	{
