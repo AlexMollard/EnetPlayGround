@@ -170,10 +170,11 @@ As an alternative to environment variables, settings can be defined in `server_c
 - [x] Position visualization
 - [x] Plugin infrastructure
 - [x] Database integration
-- [ ] Server multi-threading optimization
+- [x] Server multi-threading optimization
+- [x] Controlled server shutdown process
+- [ ] Fix bug where a client can leave and the server spams game state updates until clients start crashing
 - [ ] Enhanced security implementation
 - [ ] Improved error recovery mechanisms
-- [ ] Controlled server shutdown process
 - [ ] Administrative graphical interface
 
 ## 🔬 Research Areas
