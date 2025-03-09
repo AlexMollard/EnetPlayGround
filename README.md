@@ -38,7 +38,7 @@ The primary focus of this sandbox is to test various networking approaches, unde
         <li>📦 Reliable packet delivery implementation</li>
         <li>📢 Broadcast messaging infrastructure</li>
         <li>🗄️ MySQL database integration</li>
-        <li>🧩 Plugin architecture support</li>
+        <li>🧩 Plugin architecture support (.dll drop in)</li>
       </ul>
     </td>
     <td width="50%">
@@ -50,6 +50,7 @@ The primary focus of this sandbox is to test various networking approaches, unde
         <li>⚙️ Configurable network parameters</li>
         <li>🖼️ Graphical user interface</li>
         <li>🗺️ Position visualization</li>
+        <li>🖌️ Theming system</li>
       </ul>
     </td>
   </tr>
