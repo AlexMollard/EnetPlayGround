@@ -15,6 +15,7 @@
 #include "Constants.h"
 #include "IconsLucide.h"
 #include "Utils.h"
+#include "MarkdownHelper.h"
 
 // Constructor
 GameClient::GameClient()
@@ -785,7 +786,7 @@ void GameClient::handleChatCommandHistory()
 	{
 		if (commandHistoryIndex == -1)
 		{
-			commandHistoryIndex = (int)commandHistory.size() - 1;
+			commandHistoryIndex = (int) commandHistory.size() - 1;
 		}
 		else if (commandHistoryIndex > 0)
 		{
@@ -1748,121 +1749,142 @@ void GameClient::drawChatPanel(float width, float height)
 	ImGui::Dummy(ImVec2(0, 10)); // Space after separator
 
 	// Chat messages
-	float messagesHeight = height - 150; // Reserve space for input
+	float messagesHeight = height - 215; // Reserve space for input
 	ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, theme.frameRounding);
 	ImGui::BeginChild("ChatMessages", ImVec2(width - 40, messagesHeight), true);
-
 	{
 		std::lock_guard<std::mutex> chatLock(chatMutex);
-		for (const auto& msg: chatMessages)
+
+		// Variables for message grouping
+		std::string currentSender = "";
+		time_t groupStartTime = 0;
+		bool isFirstInGroup = true;
+		const int GROUP_TIME_THRESHOLD = 120; // Group messages within 2 minutes (adjust as needed)
+
+		for (size_t i = 0; i < chatMessages.size(); i++)
 		{
+			const auto& msg = chatMessages[i];
 			if (msg.timestamp == 0)
 			{
 				continue;
 			}
 
+			// Check if this message should start a new group
+			bool startNewGroup = (currentSender != msg.sender) || (msg.timestamp - groupStartTime > GROUP_TIME_THRESHOLD);
+
+			if (startNewGroup)
+			{
+				// Close previous group if it exists
+				if (!isFirstInGroup)
+				{
+					ImGui::Unindent(16.0f);
+					ImGui::Dummy(ImVec2(0, 4));
+					ImGui::EndChild();
+					ImGui::PopStyleColor();
+					ImGui::PopStyleVar(2); // FramePadding, FrameRounding
+				}
+
+				// Start a new message group
+				currentSender = msg.sender;
+				groupStartTime = msg.timestamp;
+				isFirstInGroup = false;
+
+				// Format sender with different colors based on type
+				ImVec4 senderColor;
+				std::string senderIcon;
+				if (msg.sender == "System" || msg.sender == "Server")
+				{
+					senderColor = theme.systemMessage; // Gold for system
+					senderIcon = ICON_LC_CIRCLE_ALERT " ";
+				}
+				else if (msg.sender == "You")
+				{
+					senderColor = theme.accentPrimary; // Accent blue for self
+					senderIcon = ICON_LC_USER " ";
+				}
+				else
+				{
+					senderColor = theme.playerOthers; // Green for others
+					senderIcon = ICON_LC_USER " ";
+				}
+
+				// Message bubble style
+				ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(10, 8));
+				ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 10.0f);
+
+				// Set background color based on sender
+				ImVec4 bubbleBgColor;
+				if (msg.sender == "You")
+				{
+					// Your messages
+					bubbleBgColor = theme.accentSecondary;
+					bubbleBgColor.w = 0.5f; // Semi-transparent
+				}
+				else
+				{
+					// Others' messages
+					bubbleBgColor = theme.bgTertiary;
+					bubbleBgColor.w = 0.7f; // Semi-transparent
+				}
+				ImGui::PushStyleColor(ImGuiCol_ChildBg, bubbleBgColor);
+
+				// Begin message bubble group with unique ID
+				ImGui::BeginChild(("MsgGroup" + std::to_string(msg.timestamp)).c_str(), ImVec2(width - 80, 0), ImGuiChildFlags_AlwaysAutoResize | ImGuiChildFlags_AutoResizeY);
+
+				// Add some extra space at the top of the bubble
+				ImGui::Dummy(ImVec2(0, 4));
+				ImGui::Indent(16.0f);
+
+				// Print sender name with icon and color
+				ImGui::TextColored(senderColor, "%s%s:", senderIcon.c_str(), msg.sender.c_str());
+			}
+
 			// Format timestamp
 			std::string timeStr = Utils::formatTimestamp(msg.timestamp);
 
-			// Format sender with different colors based on type
-			ImVec4 senderColor;
-			std::string senderIcon;
-
-			if (msg.sender == "System" || msg.sender == "Server")
+			// For each message in the group
+			if (startNewGroup)
 			{
-				senderColor = theme.systemMessage; // Gold for system
-				senderIcon = ICON_LC_CIRCLE_ALERT " ";
-			}
-			else if (msg.sender == "You")
-			{
-				senderColor = theme.accentPrimary; // Accent blue for self
-				senderIcon = ICON_LC_USER " ";
-			}
-			else
-			{
-				senderColor = theme.playerOthers; // Green for others
-				senderIcon = ICON_LC_USER " ";
+				// First message in group shows timestamp at the top
+				ImGui::TextColored(theme.textSecondary, "%s", timeStr.c_str());
 			}
 
-			// Message bubble style
-			ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(10, 8));
-			ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 10.0f);
+			// Render markdown content using MarkdownHelper
+			MarkdownHelper::RenderMarkdown(msg.content, ImGui::GetContentRegionAvail().x, theme);
+		}
 
-			// Set background color based on sender
-			ImVec4 bubbleBgColor;
-			if (msg.sender == "You")
-			{
-				// Your messages
-				bubbleBgColor = theme.accentSecondary;
-				bubbleBgColor.w = 0.5f; // Semi-transparent
-			}
-			else
-			{
-				// Others' messages
-				bubbleBgColor = theme.bgTertiary;
-				bubbleBgColor.w = 0.7f; // Semi-transparent
-			}
-
-			ImGui::PushStyleColor(ImGuiCol_ChildBg, bubbleBgColor);
-
-			// Begin message bubble
-			ImGui::BeginChild(("Msg" + std::to_string(msg.timestamp)).c_str(), ImVec2(width - 80, 0), ImGuiChildFlags_AlwaysAutoResize | ImGuiChildFlags_AutoResizeY);
-
-			// Add some extra space at the top of the bubble
-			ImGui::Dummy(ImVec2(0, 4));
-
-			ImGui::Indent(16.0f);
-
-			// Print timestamp in muted color
-			ImGui::TextColored(theme.textSecondary, "%s", timeStr.c_str());
-
-			// Print sender name with icon and color
-			ImGui::TextColored(senderColor, "%s%s:", senderIcon.c_str(), msg.sender.c_str());
-
-			// Print message content with better wrapping
-			ImGui::PushTextWrapPos(ImGui::GetContentRegionAvail().x);
-			ImGui::TextWrapped("%s", msg.content.c_str());
-			ImGui::PopTextWrapPos();
-
+		// Close the last group if there was one
+		if (!isFirstInGroup)
+		{
 			ImGui::Unindent(16.0f);
-
-			// Add some extra space at the bottom of the bubble
 			ImGui::Dummy(ImVec2(0, 4));
-
-			// End message bubble
 			ImGui::EndChild();
 			ImGui::PopStyleColor();
 			ImGui::PopStyleVar(2); // FramePadding, FrameRounding
-
-			// Make sure the next bubble starts right at the end of this one
-			ImGui::SetCursorPosY(ImGui::GetCursorPosY());
 		}
 
 		// Auto-scroll to bottom if not manually scrolled
 		if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 20)
 			ImGui::SetScrollHereY(1.0f);
 	}
-
-	ImGui::EndChild();    // End ChatMessages
+	ImGui::EndChild();
 	ImGui::PopStyleVar(); // ChildRounding
 
 	ImGui::Spacing();
 
 	// Chat input with styling
 	bool inputEnabled = (connectionState == ConnectionState::Connected);
-
 	if (!inputEnabled)
 	{
 		ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * 0.5f);
 	}
-
 	if (chatFocused && !ImGui::IsAnyItemActive() && inputEnabled)
 	{
 		ImGui::SetKeyboardFocusHere();
 	}
 
-	// Input text flags
-	ImGuiInputTextFlags inputFlags = ImGuiInputTextFlags_EnterReturnsTrue;
+	// Input text flags - use EnterReturnsTrue to capture Enter key
+	ImGuiInputTextFlags inputFlags = ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CtrlEnterForNewLine;
 	if (!inputEnabled)
 	{
 		inputFlags |= ImGuiInputTextFlags_ReadOnly;
@@ -1871,21 +1893,27 @@ void GameClient::drawChatPanel(float width, float height)
 	// Support for command history
 	handleChatCommandHistory();
 
-	// input field with button
+	// Calculate dimensions for the multiline input
+	float inputHeight = 80.0f; // Default height for multiline input
+	float buttonWidth = 100;
+	float buttonHeight = 40.0f;
+	float availableWidth = width - 40 - buttonWidth - ImGui::GetStyle().ItemSpacing.x;
+
+	// Create a container for input and button
+	ImGui::BeginGroup();
+
+	// Input field styling
 	ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(15, 12));
-	ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 25.0f);
+	ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 15.0f);
 
 	if (chatFocused && inputEnabled)
 	{
 		ImGui::PushStyleColor(ImGuiCol_FrameBg, theme.bgInput);
 	}
 
-	// Chat input field
-	float buttonWidth = 100;
-	float availableWidth = width - 40 - buttonWidth - ImGui::GetStyle().ItemSpacing.x;
-
+	// Chat multiline input field
 	ImGui::SetNextItemWidth(availableWidth);
-	bool enterPressed = ImGui::InputText("##ChatInput", chatInputBuffer, IM_ARRAYSIZE(chatInputBuffer), inputFlags);
+	bool enterPressed = ImGui::InputTextMultiline("##ChatInput", chatInputBuffer, IM_ARRAYSIZE(chatInputBuffer), ImVec2(availableWidth, inputHeight), inputFlags);
 
 	if (chatFocused && inputEnabled)
 	{
@@ -1894,9 +1922,25 @@ void GameClient::drawChatPanel(float width, float height)
 
 	ImGui::SameLine();
 
-	bool sendClicked = ImGui::Button(ICON_LC_SEND " Send", ImVec2(buttonWidth, 0)) && inputEnabled;
+	// Vertically center the send button relative to the input field
+	float yOffset = (inputHeight - buttonHeight) * 0.5f;
+	ImGui::SetCursorPosY(ImGui::GetCursorPosY() + yOffset);
 
-	ImGui::PopStyleVar(2); // FramePadding, FrameRounding
+	// Style for the send button
+	ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 25.0f);
+	bool sendClicked = ImGui::Button(ICON_LC_SEND " Send", ImVec2(buttonWidth, buttonHeight)) && inputEnabled;
+	ImGui::PopStyleVar(3); // FramePadding, FrameRounding, FrameRounding for button
+
+	// Add a tooltip for the keyboard shortcut
+	if (ImGui::IsItemHovered())
+	{
+		ImGui::SetTooltip("Send message (Enter)");
+	}
+
+	ImGui::EndGroup();
+
+	// Add a help text below the input
+	ImGui::TextColored(theme.textSecondary, "Press Enter to send, Ctrl+Enter for new line");
 
 	if (!inputEnabled)
 	{
@@ -1907,6 +1951,17 @@ void GameClient::drawChatPanel(float width, float height)
 	if ((enterPressed || sendClicked) && inputEnabled)
 	{
 		processChatInput();
+	}
+
+	// Handle resizing hint (optional - can be expanded)
+	ImVec2 inputPos = ImGui::GetItemRectMin();
+	ImVec2 inputSize = ImGui::GetItemRectSize();
+	bool isHoveringBottomEdge = ImGui::IsMouseHoveringRect(ImVec2(inputPos.x, inputPos.y + inputSize.y - 5), ImVec2(inputPos.x + inputSize.x, inputPos.y + inputSize.y), false);
+
+	if (isHoveringBottomEdge)
+	{
+		ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
+		// This is where you could add drag resizing logic
 	}
 
 	ImGui::EndChild();     // End ChatPanel
@@ -1957,7 +2012,7 @@ void GameClient::drawNetworkOptionsUI(float width, float height)
 
 	{
 		// Position update rate
-		int updateRate = (int)positionUpdateRateMs;
+		int updateRate = (int) positionUpdateRateMs;
 		if (ImGui::SliderInt(ICON_LC_WIFI " Update Rate (ms)", &updateRate, 50, 500))
 		{
 			positionUpdateRateMs = updateRate;

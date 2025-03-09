@@ -72,7 +72,7 @@ int main(int argc, char* argv[])
 			strcpy_s(baseConfig.Name, "Regular");
 
 			// Regular font
-			FontConfig regularFont{ resDir + "JetBrainsMono.ttf", BASE_FONT_SIZE, nullptr, &baseConfig };
+			FontConfig regularFont{ resDir + "WorkSans-Regular.ttf", BASE_FONT_SIZE, nullptr, &baseConfig };
 			if (!LoadFont(regularFont, io.Fonts))
 			{
 				client->getLogger().error("Failed to load regular font");
@@ -103,7 +103,7 @@ int main(int argc, char* argv[])
 			strcpy_s(headerConfig.Name, "Header");
 
 			// Header font
-			FontConfig headerFont{ resDir + "JetBrainsMono.ttf", HEADER_FONT_SIZE, nullptr, &headerConfig };
+			FontConfig headerFont{ resDir + "WorkSans-Bold.ttf", HEADER_FONT_SIZE, nullptr, &headerConfig };
 			if (!LoadFont(headerFont, io.Fonts))
 			{
 				client->getLogger().error("Failed to load header font");
@@ -126,34 +126,48 @@ int main(int argc, char* argv[])
 			}
 		}
 
-		// --- Font 2: Small font with icons (optional) ---
+		// --- Font 2: Bold font ---
 		{
-			// Small font config
-			ImFontConfig smallConfig;
-			smallConfig.SizePixels = SMALL_FONT_SIZE;
-			strcpy_s(smallConfig.Name, "Small");
+			// Bold font config
+			ImFontConfig boldConfig;
+			boldConfig.SizePixels = BASE_FONT_SIZE;
+			strcpy_s(boldConfig.Name, "Bold");
 
-			// Small font
-			FontConfig smallFont{ resDir + "JetBrainsMono.ttf", SMALL_FONT_SIZE, nullptr, &smallConfig };
-			if (!LoadFont(smallFont, io.Fonts))
+			// Bold font
+			FontConfig boldFont{ resDir + "WorkSans-Bold.ttf", BASE_FONT_SIZE, nullptr, &boldConfig };
+			if (!LoadFont(boldFont, io.Fonts))
 			{
-				client->getLogger().error("Failed to load small font");
+				client->getLogger().error("Failed to load bold font");
 			}
+		}
 
-			// Icons config to merge with small font
-			ImFontConfig iconsConfig;
-			iconsConfig.MergeMode = true;
-			iconsConfig.PixelSnapH = true;
-			iconsConfig.OversampleH = 2;
-			iconsConfig.OversampleV = 2;
-			iconsConfig.GlyphOffset = ImVec2(0, 3);
-			strcpy_s(iconsConfig.Name, "Icons-Small");
+		// --- Font 3: Monospace font ---
+		{
+			// Monospace font config
+			ImFontConfig monoConfig;
+			monoConfig.SizePixels = BASE_FONT_SIZE;
+			strcpy_s(monoConfig.Name, "Monospace");
 
-			// Icon font to merge with small font
-			FontConfig iconFont{ resDir + "lucide.ttf", SMALL_FONT_SIZE, icons_ranges, &iconsConfig };
-			if (!LoadFont(iconFont, io.Fonts))
+			// Monospace font
+			FontConfig monoFont{ resDir + "JetBrainsMono.ttf", BASE_FONT_SIZE, nullptr, &monoConfig };
+			if (!LoadFont(monoFont, io.Fonts))
 			{
-				client->getLogger().error("Failed to load icon font for small");
+				client->getLogger().error("Failed to load monospace font");
+			}
+		}
+
+		// --- Font 4: Italics font ---
+		{
+			// Italics font config
+			ImFontConfig italicsConfig;
+			italicsConfig.SizePixels = BASE_FONT_SIZE;
+			strcpy_s(italicsConfig.Name, "Italics");
+
+			// Italics font
+			FontConfig italicsFont{ resDir + "WorkSans-Italic.ttf", BASE_FONT_SIZE, nullptr, &italicsConfig };
+			if (!LoadFont(italicsFont, io.Fonts))
+			{
+				client->getLogger().error("Failed to load italics font");
 			}
 		}
 

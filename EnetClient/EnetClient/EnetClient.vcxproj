@@ -83,6 +83,7 @@
     <ClCompile Include="..\..\EnetShared\StackTrace.cpp" />
     <ClCompile Include="..\..\EnetShared\Logger.cpp" />
     <ClCompile Include="..\..\EnetShared\Utils.cpp" />
+    <ClCompile Include="src\MarkdownHelper.cpp" />
     <ClCompile Include="src\AuthManager.cpp" />
     <ClCompile Include="src\NetworkManager.cpp" />
     <ClCompile Include="src\EnetClient.cpp" />
@@ -98,6 +99,7 @@
     <ClInclude Include="..\..\EnetShared\Utils.h" />
     <ClInclude Include="..\..\EnetShared\Structs.h" />
     <ClInclude Include="..\..\EnetShared\IconsLucide.h" />
+    <ClInclude Include="src\MarkdownHelper.h" />
     <ClInclude Include="src\AuthManager.h" />
     <ClInclude Include="src\NetworkManager.h" />
     <ClInclude Include="src\Constants.h" />

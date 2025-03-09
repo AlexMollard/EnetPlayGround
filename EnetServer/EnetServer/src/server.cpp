@@ -503,7 +503,7 @@ void GameServer::run()
 				        }
 				        else if (command.substr(0, 9) == "broadcast")
 				        {
-					        std::string message = command.substr(9);
+					        std::string message = command.substr(10);
 					        broadcastSystemMessage(message);
 				        }
 				        else if (command.substr(0, 4) == "kick")
