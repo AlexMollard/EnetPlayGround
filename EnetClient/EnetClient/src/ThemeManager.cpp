@@ -3,7 +3,7 @@
 ThemeManager::ThemeManager()
 {
 	createDefaultThemes();
-	currentTheme = themes["Gruvbox"]; // Default theme
+	currentTheme = themes["Dark"]; // Default theme
 }
 
 void ThemeManager::createDefaultThemes()

@@ -15,6 +15,7 @@ void MarkdownHelper::RenderMarkdown(const std::string& markdown, float wrapWidth
 
 	// Text wrapping setup
 	ImGui::PushTextWrapPos(wrapWidth);
+	ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 0));
 
 	// Parse and render markdown
 	std::istringstream stream(markdown);
@@ -82,9 +83,6 @@ void MarkdownHelper::RenderMarkdown(const std::string& markdown, float wrapWidth
 
 		// Regular paragraph - process inline formatting
 		RenderInlineMarkdown(line, theme);
-
-		// Add line spacing
-		ImGui::Spacing();
 	}
 
 	// If we're still in a code block at the end, close it
@@ -92,6 +90,9 @@ void MarkdownHelper::RenderMarkdown(const std::string& markdown, float wrapWidth
 	{
 		RenderCodeBlock(codeBlockContent, wrapWidth, theme);
 	}
+
+	// Pop spacing
+	ImGui::PopStyleVar();
 
 	// Pop text wrap
 	ImGui::PopTextWrapPos();
