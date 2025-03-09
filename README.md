@@ -27,35 +27,34 @@ EnetPlayGround is an experimental platform for exploring networking concepts usi
 The primary focus of this sandbox is to test various networking approaches, understand performance limitations, and implement scalable client-server architecture patterns.
 
 ## ✨ Features
-<div align="center">
-  <table>
-    <tr>
-      <td width="50%">
-        <h3>🖥️ Server Components</h3>
-        <ul>
-          <li>🔌 Multi-client connection management</li>
-          <li>⚡ Robust event handling system</li>
-          <li>📦 Reliable packet delivery implementation</li>
-          <li>📢 Broadcast messaging infrastructure</li>
-          <li>🗄️ MySQL database integration</li>
-          <li>🧩 Plugin architecture support</li>
-        </ul>
-      </td>
-      <td width="50%">
-        <h3>📱 Client Implementation</h3>
-        <ul>
-          <li>🔄 Connection stability management</li>
-          <li>⏱️ Game state synchronization</li>
-          <li>📝 Comprehensive logging system</li>
-          <li>⚙️ Configurable network parameters</li>
-          <li>🖼️ Graphical user interface</li>
-          <li>🗺️ Position visualization</li>
-          <li>🖌️ Theming system</li>
-        </ul>
-      </td>
-    </tr>
-  </table>
-</div>
+
+<table align="center">
+  <tr>
+    <td width="50%">
+      <h3>🖥️ Server Components</h3>
+      <ul>
+        <li>🔌 Multi-client connection management</li>
+        <li>⚡ Robust event handling system</li>
+        <li>📦 Reliable packet delivery implementation</li>
+        <li>📢 Broadcast messaging infrastructure</li>
+        <li>🗄️ MySQL database integration</li>
+        <li>🧩 Plugin architecture support</li>
+      </ul>
+    </td>
+    <td width="50%">
+      <h3>📱 Client Implementation</h3>
+      <ul>
+        <li>🔄 Connection stability management</li>
+        <li>⏱️ Game state synchronization</li>
+        <li>📝 Comprehensive logging system</li>
+        <li>⚙️ Configurable network parameters</li>
+        <li>🖼️ Graphical user interface</li>
+        <li>🗺️ Position visualization</li>
+        <li>🖌️ Theming system</li>
+      </ul>
+    </td>
+  </tr>
+</table>
 
 ## 📸 Screenshots
 
