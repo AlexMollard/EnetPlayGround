@@ -43,7 +43,7 @@ private:
 	std::ofstream logFile;
 	std::mutex logMutex;
 	bool useColors = true;
-	LogLevel minLevel = LogLevel::DEBUG;
+	LogLevel minLevel = LogLevel::TRACE;
 	size_t maxFileSize = 10 * 1024 * 1024; // 10 MB default
 	int maxBackupFiles = 3;
 	bool autoStackTraceForErrors = true;

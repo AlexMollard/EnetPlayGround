@@ -219,6 +219,8 @@ private:
     void broadcastWorldState();
 	void handlePacket(const Player& player, std::unique_ptr<GameProtocol::Packet> packet);
 
+	void handlePositionUpdate(uint32_t playerId, const Position& newPos);
+
 	void checkTimeouts();
 	void savePlayerData(const std::string& username, const Position& lastPos);
 	void loadAuthData();

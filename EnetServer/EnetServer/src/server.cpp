@@ -839,7 +839,7 @@ void GameServer::handleClientMessage(const ENetEvent& event)
 		        player->totalBytesReceived += event.packet->dataLength;
 
 		        // Log the message type
-		        logger.logNetworkEvent("Message from " + player->name + ": Packet Type " + std::to_string(static_cast<int>(packetPtr->getType())));
+		        logger.logNetworkEvent("Message from " + player->name + ": Packet Type " + GameProtocol::getPacketTypeName(packetPtr->getType()));
 
 		        // Send plugin event (you might need to adapt this for binary packets)
 		        // For now, we'll skip this or implement a string-based representation
@@ -974,12 +974,42 @@ void GameServer::handlePacket(const Player& player, std::unique_ptr<GameProtocol
 			break;
 		}
 
-			// Add cases for other packet types
+		case GameProtocol::PacketType::PositionUpdate:
+		{
+			// Handle position update
+			if (!player.isAuthenticated)
+			{
+				logger.error("Unauthenticated player tried to update position");
+				return;
+			}
+			auto& posPacket = static_cast<GameProtocol::PositionUpdatePacket&>(packet);
+			// Schedule position update with the right resources
+			threadManager.scheduleResourceTask({ GameResources::PlayersId, GameResources::SpatialGridId }, [this, playerId = player.id, newPos = posPacket.position]() { handlePositionUpdate(playerId, newPos); });
+			break;
+		}
+		
 
 		default:
-			logger.error("Received unknown packet type: " + std::to_string(static_cast<int>(packet.getType())));
+			logger.error("Received unknown packet type: " + GameProtocol::getPacketTypeName(packet.getType()));
 			break;
 	}
+}
+
+void GameServer::handlePositionUpdate(uint32_t playerId, const Position& newPos)
+{
+	// Find player
+	auto it = players.find(playerId);
+	if (it == players.end())
+	{
+		logger.error("Received position update for unknown player ID: " + std::to_string(playerId));
+		return;
+	}
+	Player& player = it->second;
+	// Update player position
+	Position lastPos = player.position;
+	player.position = newPos;
+	// Update spatial grid
+	spatialGrid.updateEntity(playerId, lastPos, newPos);
 }
 
 // Handle client disconnect
@@ -2118,7 +2148,6 @@ void GameServer::loadAuthData()
 		        {
 			        if (dbManager.loadAuthData(authenticatedPlayers, nextPlayerId))
 			        {
-				        logger.info("Successfully loaded " + std::to_string(authenticatedPlayers.size()) + " player accounts from database");
 				        return;
 			        }
 			        else

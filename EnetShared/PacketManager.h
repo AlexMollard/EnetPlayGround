@@ -24,6 +24,8 @@ public:
 		if (!peer)
 			return;
 
+		logger.trace("Sending packet of type: " + GameProtocol::getPacketTypeName(packet.getType()));
+
 		// Serialize the packet
 		std::vector<uint8_t> data = packet.serialize();
 

@@ -96,6 +96,13 @@ void AuthManager::processAuthResponse(const void* packetData, size_t packetLengt
 	auto successCallback = authSuccessCallback ? authSuccessCallback : this->authSuccessCallback;
 	auto failedCallback = authFailedCallback ? authFailedCallback : this->authFailedCallback;
 
+	// If either of the callbacks are null, we can't do anything
+	if (!successCallback || !failedCallback)
+	{
+		logger.fatal("No callbacks provided for auth response processing, this will cause a crash!");
+		return;
+	}
+
 	// Create a span from the raw packet data
 	std::span<const uint8_t> data(static_cast<const uint8_t*>(packetData), packetLength);
 

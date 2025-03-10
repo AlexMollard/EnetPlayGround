@@ -80,7 +80,6 @@
   <ItemGroup>
     <ClCompile Include="..\..\EnetShared\StackTrace.cpp" />
     <ClCompile Include="..\..\EnetShared\Logger.cpp" />
-    <ClCompile Include="..\..\EnetShared\ThreadManager.cpp" />
     <ClCompile Include="..\..\EnetShared\Utils.cpp" />
     <ClCompile Include="src\DatabaseManager.cpp" />
     <ClCompile Include="src\PluginManager.cpp" />

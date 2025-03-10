@@ -558,35 +558,61 @@ void GameClient::startConnection()
 		        // Update connection progress
 		        threadManager->scheduleUITask([this]() { connectionProgress = 0.5f; });
 
-		        // Create authentication packet
-		        auto authPacket = networkManager->GetPacketManager()->createAuthRequest(myPlayerName, myPassword);
-
-		        // Get server peer from NetworkManager
-		        ENetPeer* serverPeer = networkManager->getServerPeer();
-
-		        if (serverPeer)
+		        std::function<void(uint32_t)> successCallback = [this](uint32_t playerId)
 		        {
-			        // Send auth packet
-			        networkManager->GetPacketManager()->sendPacket(serverPeer, *authPacket, true);
+			        // Update player state
+			        myPlayerId = playerId;
+			        connectionState = ConnectionState::Connected;
 
-			        // Update UI state
+			        // Send position update
+			        ENetPeer* serverPeer = networkManager->getServerPeer();
+			        if (serverPeer)
+			        {
+				        auto posRequest = networkManager->GetPacketManager()->createPositionUpdate(myPlayerId, myPosition);
+				        networkManager->GetPacketManager()->sendPacket(serverPeer, *posRequest, true);
+			        }
+			        else
+			        {
+				        logger.error("Failed to get server peer after authentication");
+			        }
+
+			        // Add welcome message
+			        addChatMessage("System", "Login successful! Welcome, " + myPlayerName);
+		        };
+
+		        std::function<void(const std::string&)> failedCallback = [this](const std::string& errorMsg)
+		        {
+			        threadManager->scheduleUITask(
+			                [this, errorMsg]()
+			                {
+				                loginErrorMessage = "Authentication failed: " + errorMsg;
+				                connectionState = ConnectionState::LoginScreen;
+				                networkManager->disconnect(true);
+			                });
+		        };
+
+		        // Use AuthManager to authenticate - this properly sets up the callbacks
+		        bool authStarted = authManager->authenticate(myPlayerName, myPassword, rememberCredentials, successCallback, failedCallback);
+
+		        if (!authStarted)
+		        {
+			        threadManager->scheduleUITask(
+			                [this]()
+			                {
+				                loginErrorMessage = "Failed to start authentication";
+				                connectionState = ConnectionState::LoginScreen;
+			                });
+			        networkManager->disconnect(true);
+		        }
+		        else
+		        {
+			        // Update UI state on successful auth start
 			        threadManager->scheduleUITask(
 			                [this]()
 			                {
 				                connectionState = ConnectionState::Authenticating;
 				                connectionProgress = 0.7f;
 			                });
-		        }
-		        else
-		        {
-			        // Failed to get server peer
-			        threadManager->scheduleUITask(
-			                [this]()
-			                {
-				                loginErrorMessage = "Failed to authenticate: Internal error";
-				                connectionState = ConnectionState::LoginScreen;
-			                });
-			        networkManager->disconnect(true);
 		        }
 	        });
 
@@ -633,9 +659,7 @@ void GameClient::updateNetwork()
 			        else
 			        {
 				        // Use full position update
-				        ENetPeer* serverPeer = nullptr;
-				        // TODO: Add method to get server peer
-
+				        ENetPeer* serverPeer = networkManager->getServerPeer();
 				        if (serverPeer)
 				        {
 					        auto posPacket = networkManager->GetPacketManager()->createPositionUpdate(myPlayerId, myPosition);
