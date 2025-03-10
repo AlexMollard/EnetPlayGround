@@ -107,7 +107,7 @@ public:
      * Disconnect from the server
      * @param showMessage Whether to show a message
      */
-	void disconnect(bool showMessage = true);
+	void disconnect(bool tellServer = true);
 
 	/**
      * Process a single network update cycle
@@ -332,9 +332,4 @@ private:
      * Clear chat history
      */
 	void clearChatMessages();
-
-	/**
-     * Handle server disconnection
-     */
-	void handleServerDisconnection();
 };

@@ -514,13 +514,6 @@ void Logger::warning(const std::string& message)
 void Logger::error(const std::string& message)
 {
 	log(LogLevel::ERR, message, true);
-
-	// Automatically add stack trace if enabled
-	if (autoStackTraceForErrors)
-	{
-		std::string stackTrace = StackTrace::capture(1, stackTraceMaxFrames);
-		log(LogLevel::ERR, "Stack trace for previous error:" + stackTrace, true);
-	}
 }
 
 void Logger::fatal(const std::string& message)

@@ -1658,7 +1658,7 @@ void GameServer::sendPacket(ENetPeer* peer, const std::string& message, bool rel
 
 	if (enet_peer_send(peer, 0, packet) < 0)
 	{
-		logger.error("Failed to send packet: " + message);
+		logger.warning("Failed to send packet: " + message);
 		enet_packet_destroy(packet);
 		return;
 	}
@@ -2859,17 +2859,11 @@ bool GameServer::kickPlayer(const std::string& playerName, const std::string& ad
 				        Player playerCopy = pair.second;
 				        ENetPeer* playerPeer = pair.second.peer;
 
-				        // Schedule sending a message to the kicked player
-				        threadManager.scheduleTask([this, playerCopy, adminName]() { sendSystemMessage(playerCopy, "You have been kicked by " + adminName); });
-
 				        // Log the kick
 				        logger.info("Player " + playerName + " kicked by " + adminName);
 
-				        // Schedule broadcasting the kick message
-				        threadManager.scheduleTask([this, playerName, adminName]() { broadcastSystemMessage(playerName + " has been kicked by " + adminName); });
-
 				        // Schedule disconnecting the player
-				        threadManager.scheduleTask([playerPeer]() { enet_peer_disconnect(playerPeer, 0); });
+				        enet_peer_disconnect(playerPeer, 0);
 
 				        playerFound = true;
 				        break;

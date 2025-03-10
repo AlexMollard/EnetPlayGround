@@ -30,7 +30,7 @@ GameClient::GameClient(bool isDebuggerAttached)
 
 	// Create the thread manager first - use slightly fewer threads than max
 	// to leave some CPU for the main thread and UI
-	size_t numThreads = max(1u, std::thread::hardware_concurrency() - 2);
+	size_t numThreads = max(1u, 4);
 	threadManager = std::make_shared<ThreadManager>(numThreads);
 
 	// Create NetworkManager with thread manager
@@ -114,25 +114,13 @@ bool GameClient::initialize()
 }
 
 // Disconnect from the server
-void GameClient::disconnect(bool showMessage)
+void GameClient::disconnect(bool tellServer)
 {
 	// Let NetworkManager handle the actual disconnection
-	networkManager->disconnect(showMessage);
+	networkManager->disconnect(tellServer);
 
 	// Update client state
 	connectionState = ConnectionState::LoginScreen;
-}
-
-void GameClient::handleServerDisconnection()
-{
-	connectionState = ConnectionState::LoginScreen;
-
-	// Try to reconnect if not exiting
-	if (!shouldExit && !reconnecting && autoLogin)
-	{
-		// Use thread manager for reconnection attempt
-		threadManager->scheduleNetworkTask([this]() { networkManager->reconnectToServer(); });
-	}
 }
 
 void GameClient::applyTheme()
@@ -270,13 +258,12 @@ void GameClient::handlePacket(const ENetPacket* packet)
 			// Registration failed
 			registerErrorMessage = "Registration failed: " + response.substr(6);
 			connectionState = ConnectionState::RegisterScreen;
-			networkManager->disconnect(false);
+			networkManager->disconnect(true);
 		}
 
 		return;
 	}
 
-	// Don't log position updates to avoid spam
 	if (message.substr(0, 12) != "WORLD_STATE:" && message.substr(0, 5) != "PONG:")
 	{
 		logger.logNetworkEvent("Received: " + message);
@@ -292,19 +279,22 @@ void GameClient::handlePacket(const ENetPacket* packet)
 	{
 		// format: POSITION:x18.254965,y0.000000,z-22.989958
 		// Process chat message from server
-		//size_t colonPos = message.find(':', 5);
-		//if (colonPos != std::string::npos)
-		//{
-		//	std::string x = message.substr(colonPos + 1, message.find(',', colonPos + 1) - colonPos - 1);
-		//	std::string y = message.substr(message.find(',', colonPos + 1) + 1, message.find(',', message.find(',', colonPos + 1) + 1) - message.find(',', colonPos + 1) - 1);
-		//	std::string z = message.substr(message.find(',', message.find(',', colonPos + 1) + 1) + 1);
-		//
-		//	logger.log("Received position update: X=" + x + " Y=" + y + " Z=" + z);
+		size_t colonPos = message.find(':', 5);
+		if (colonPos != std::string::npos)
+		{
+			std::string x = message.substr(colonPos + 1, message.find(',', colonPos + 1) - colonPos - 1);
+			std::string y = message.substr(message.find(',', colonPos + 1) + 1, message.find(',', message.find(',', colonPos + 1) + 1) - message.find(',', colonPos + 1) - 1);
+			std::string z = message.substr(message.find(',', message.find(',', colonPos + 1) + 1) + 1);
 
-		//	myPosition.x = std::stof(x);
-		//	myPosition.y = std::stof(y);
-		//	myPosition.z = std::stof(z);
-		//}
+			// Remove the leading 'x', 'y', 'z'
+			x = x.substr(1);
+			y = y.substr(1);
+			z = z.substr(1);
+
+			myPosition.x = std::stof(x);
+			myPosition.y = std::stof(y);
+			myPosition.z = std::stof(z);
+		}
 	}
 	else if (message.substr(0, 5) == "CHAT:")
 	{
@@ -578,12 +568,12 @@ void GameClient::startConnection()
 				                        loginErrorMessage = "Authentication failed: " + errorMsg;
 				                        connectionState = ConnectionState::LoginScreen;
 			                        });
-			                networkManager->disconnect(false);
+			                networkManager->disconnect(true);
 		                });
 
 		        if (!authStarted)
 		        {
-			        networkManager->disconnect(false);
+			        networkManager->disconnect(true);
 			        threadManager->scheduleUITask(
 			                [this]()
 			                {
@@ -629,13 +619,13 @@ void GameClient::updateNetwork()
 	        // Packet handler callback
 	        [this](const ENetPacket* packet) { handlePacket(packet); },
 	        // Disconnect callback
-	        [this]() { handleServerDisconnection(); });
+	        [this]() { signOut(); });
 
 	// Connection health checks at regular intervals
 	if (currentTime - lastConnectionCheckTime >= 1000)
 	{
 		networkManager->sendPing();
-		networkManager->checkConnectionHealth([this]() { handleServerDisconnection(); });
+		networkManager->checkConnectionHealth();
 		lastConnectionCheckTime = currentTime;
 	}
 }

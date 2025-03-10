@@ -110,7 +110,7 @@ NetworkManager::NetworkManager(Logger& logger, std::shared_ptr<ThreadManager> th
 // Destructor with enhanced cleanup
 NetworkManager::~NetworkManager()
 {
-	disconnect();
+	disconnect(true);
 
 	// Clean up ENet resources
 	threadManager->scheduleResourceTask({ GameResources::networkResourceId },
@@ -323,7 +323,7 @@ bool NetworkManager::connectToServer(const char* address, uint16_t port)
 	// Check if connection timed out
 	if (!connectionEstablished)
 	{
-		logger.error("Connection to server failed (timeout)");
+		logger.warning("Connection to server failed (timeout)");
 
 		{
 			std::lock_guard<std::mutex> guard(connectionStateMutex);
@@ -346,49 +346,29 @@ bool NetworkManager::connectToServer(const char* address, uint16_t port)
 	return true;
 }
 
-void NetworkManager::disconnect(bool showMessage)
+void NetworkManager::disconnect(bool tellServer)
 {
-	// Check if we're already disconnected (without blocking)
-	bool shouldDisconnect = false;
-
-	{
-		std::lock_guard<std::mutex> guard(connectionStateMutex);
-		shouldDisconnect = (connectionState != ConnectionState::DISCONNECTED);
-	}
-
-	if (!shouldDisconnect)
+	// Check if we're already disconnected
+	if (connectionState == ConnectionState::DISCONNECTED)
 	{
 		return;
 	}
 
-	// All ENet operations need to be serialized with enetMutex
-	std::lock_guard<std::mutex> enetGuard(enetMutex);
-
 	// Update connection state
-	{
-		std::lock_guard<std::mutex> guard(connectionStateMutex);
-		connectionState = ConnectionState::DISCONNECTING;
-	}
+	connectionState = ConnectionState::DISCONNECTING;
 
 	bool wasConnected = false;
 	ENetPeer* serverToDisconnect = nullptr;
 
-	{
-		std::lock_guard<std::mutex> guard(connectionStateMutex);
-		wasConnected = isConnected;
-		serverToDisconnect = server;
-	}
+	wasConnected = isConnected;
+	serverToDisconnect = server;
 
 	if (wasConnected && serverToDisconnect != nullptr)
 	{
-		if (showMessage)
-		{
-			logger.info("Disconnecting from server...");
-		}
+		logger.info("Disconnecting from server...");
 
 		// Calculate and record session time
 		{
-			std::lock_guard<std::mutex> guard(diagnosticsMutex);
 			if (diagnostics.lastConnectionTime > 0)
 			{
 				uint64_t sessionTime = getCurrentTimeMs() - diagnostics.lastConnectionTime;
@@ -407,7 +387,7 @@ void NetworkManager::disconnect(bool showMessage)
 		uint64_t disconnectStartTime = getCurrentTimeMs();
 
 		// Wait up to 3 seconds for clean disconnection
-		while (getCurrentTimeMs() - disconnectStartTime < 3000 && !disconnected)
+		while (tellServer && getCurrentTimeMs() - disconnectStartTime < 3000 && !disconnected)
 		{
 			while (enet_host_service(client, &event, 100) > 0)
 			{
@@ -430,33 +410,35 @@ void NetworkManager::disconnect(bool showMessage)
 		// Force disconnect if not acknowledged
 		if (!disconnected)
 		{
-			logger.warning("Forcing disconnection after timeout");
+			logger.warning("Forcing disconnection!");
 			enet_peer_reset(serverToDisconnect);
 		}
 
-		// Update state
-		{
-			std::lock_guard<std::mutex> guard(connectionStateMutex);
-			server = nullptr;
-			isConnected = false;
-			connectionState = ConnectionState::DISCONNECTED;
-			waitingForPingResponse = false;
-			successivePingFailures = 0;
-		}
-	}
-	else
-	{
-		// Update state if we weren't actually connected
-		std::lock_guard<std::mutex> guard(connectionStateMutex);
+		server = nullptr;
 		isConnected = false;
 		connectionState = ConnectionState::DISCONNECTED;
 		waitingForPingResponse = false;
 		successivePingFailures = 0;
 	}
+	else
+	{
+		isConnected = false;
+		connectionState = ConnectionState::DISCONNECTED;
+		waitingForPingResponse = false;
+		successivePingFailures = 0;
+	}
+
+	connectionInProgress.store(false);
 }
 
 bool NetworkManager::reconnectToServer()
 {
+	if (connectionState == ConnectionState::DISCONNECTING)
+	{
+		logger.warning("Reconnection attempt ignored - disconnecting in progress");
+		return false;
+	}
+
 	// Check if we're connected
 	bool isCurrentlyConnected = false;
 	{
@@ -466,7 +448,7 @@ bool NetworkManager::reconnectToServer()
 
 	if (isCurrentlyConnected)
 	{
-		disconnect(false);
+		disconnect(true);
 	}
 
 	logger.info("Attempting to reconnect to server...");
@@ -1045,16 +1027,9 @@ void NetworkManager::update(const std::function<void()>& updatePositionCallback,
 				}
 
 				case ENET_EVENT_TYPE_DISCONNECT:
-					logger.error("Disconnected from server");
-					isConnected = false;
-					connectionState = ConnectionState::DISCONNECTED;
-					server = nullptr;
-
-					// Schedule disconnect callback using thread manager
-					if (disconnectCallback)
-					{
-						threadManager->scheduleNetworkTask(disconnectCallback);
-					}
+					logger.warning("Disconnected from server");
+					disconnectCallback();
+					
 					return; // Exit early on disconnect
 
 				default:
@@ -1217,7 +1192,7 @@ void NetworkManager::sendPing()
 }
 
 // Connection health checking
-void NetworkManager::checkConnectionHealth(const std::function<void()>& disconnectCallback)
+void NetworkManager::checkConnectionHealth()
 {
 	// First check if conditions allow for checking connection health
 	bool shouldCheckHealth = threadManager->scheduleReadTaskWithResult({ GameResources::networkResourceId }, [this]() { return isConnected && connectionState == ConnectionState::CONNECTED && !reconnecting; }).get();
@@ -1264,10 +1239,9 @@ void NetworkManager::checkConnectionHealth(const std::function<void()>& disconne
 		        }
 	        });
 
-	// Call the callback if needed
-	if (shouldDisconnect && disconnectCallback)
+	if (shouldDisconnect)
 	{
-		disconnectCallback();
+		disconnect(false); // Whats the point in telling the server if we cant even reach it correctly?
 	}
 }
 

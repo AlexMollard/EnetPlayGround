@@ -148,7 +148,7 @@ public:
 
 	bool initialize();
 	bool connectToServer(const char* address, uint16_t port);
-	void disconnect(bool showMessage = true);
+	void disconnect(bool tellServer = true);
 	bool reconnectToServer();
 
 	void updateConnectionDiagnostics(uint64_t connectStartTime);
@@ -161,7 +161,7 @@ public:
 	// Network processing
 	void update(const std::function<void()>& updatePositionCallback, const std::function<void(const ENetPacket*)>& handlePacketCallback, const std::function<void()>& disconnectCallback);
 	void sendPing();
-	void checkConnectionHealth(const std::function<void()>& disconnectCallback);
+	void checkConnectionHealth();
 
 	// Configuration
 	void setServerResponseTimeout(uint32_t timeoutMs)
