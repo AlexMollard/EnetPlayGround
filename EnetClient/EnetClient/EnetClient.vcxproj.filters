@@ -86,5 +86,14 @@
     <ClInclude Include="src\MarkdownHelper.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\EnetShared\PacketHeader.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\EnetShared\PacketManager.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\EnetShared\PacketTypes.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

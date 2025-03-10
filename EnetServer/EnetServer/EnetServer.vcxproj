@@ -89,6 +89,7 @@
     <ClCompile Include="src\Server.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\..\EnetShared\IconsLucide.h" />
     <ClInclude Include="..\..\EnetShared\StackTrace.h" />
     <ClInclude Include="..\..\EnetShared\Logger.h" />
     <ClInclude Include="..\..\EnetShared\ThreadManager.h" />
@@ -97,6 +98,9 @@
     <ClInclude Include="..\..\EnetShared\Utils.h" />
     <ClInclude Include="..\..\EnetShared\PluginInterface.h" />
     <ClInclude Include="..\..\EnetShared\Structs.h" />
+    <ClInclude Include="..\..\EnetShared\PacketManager.h" />
+    <ClInclude Include="..\..\EnetShared\PacketTypes.h" />
+    <ClInclude Include="..\..\EnetShared\PacketHeader.h" />
     <ClInclude Include="src\DatabaseManager.h" />
     <ClInclude Include="src\PluginManager.h" />
     <ClInclude Include="src\SpatialGrid.h" />

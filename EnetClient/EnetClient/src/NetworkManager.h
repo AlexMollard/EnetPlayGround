@@ -14,6 +14,7 @@
 #include "AuthManager.h"
 #include "Constants.h"
 #include "Logger.h"
+#include "PacketManager.h"
 #include "ThreadManager.h"
 
 // Advanced diagnostics
@@ -123,7 +124,9 @@ namespace GameResources
 	}
 
 	// This is basically a struct to control task execution
-	struct NetworkState {};
+	struct NetworkState
+	{
+	};
 
 	const ResourceId networkResourceId = create<NetworkState>("NetworkState");
 	const ResourceId queueResourceId = create<QueuedPacket>("PacketQueue");
@@ -154,8 +157,9 @@ public:
 	void updateConnectionDiagnostics(uint64_t connectStartTime);
 
 	// Packet sending
-	void sendPacket(const std::string& message, bool reliable = true);
-	void sendPacketWithPriority(const std::string& message, bool reliable, uint8_t priority);
+	void sendPacket(std::shared_ptr<GameProtocol::Packet> packet, bool reliable);
+	void queuePacket(const std::string& data, bool reliable, uint8_t priority);
+	void sendPacketWithPriority(std::shared_ptr<GameProtocol::Packet> packet, bool reliable, uint8_t priority);
 	void sendPositionUpdate(float x, float y, float z, float lastX, float lastY, float lastZ, bool useCompressedUpdates, float movementThreshold);
 
 	// Network processing
@@ -193,7 +197,6 @@ public:
 
 	// MMO-specific features
 	void prepareForZoneTransition();
-	void setAreaOfInterest(const std::string& areaId, int radius);
 	void adaptToHighPopulationDensity(bool highDensity);
 
 	// Priority modes
@@ -301,14 +304,38 @@ public:
 		authManager = auth;
 	}
 
+	/**
+	 * Get the server peer for direct packet sending
+	 * @return Pointer to the connected server peer, or nullptr if not connected
+	 */
+	ENetPeer* getServerPeer() const
+	{
+		std::lock_guard<std::mutex> guard(enetMutex);
+
+		// Only return the server peer if we're properly connected
+		if (isConnected && connectionState == ConnectionState::CONNECTED)
+		{
+			return server;
+		}
+
+		return nullptr;
+	}
+
+	PacketManager* GetPacketManager()
+	{
+		return &packetManager;
+	}
+
 private:
 	// Mutexes for thread safety
-	mutable std::mutex enetMutex;                            // Protects all ENet operations
-	mutable std::mutex connectionStateMutex;                 // Protects connection state variables
-	mutable std::mutex diagnosticsMutex;                     // Protects diagnostics data
-	mutable std::mutex bandwidthMutex;                       // Protects bandwidth management
-	mutable std::mutex queueMutex;                           // Protects the packet queue
+	mutable std::mutex enetMutex;                    // Protects all ENet operations
+	mutable std::mutex connectionStateMutex;         // Protects connection state variables
+	mutable std::mutex diagnosticsMutex;             // Protects diagnostics data
+	mutable std::mutex bandwidthMutex;               // Protects bandwidth management
+	mutable std::mutex queueMutex;                   // Protects the packet queue
 	std::atomic<bool> connectionInProgress{ false }; // Prevent concurrent connection attempts
+
+	PacketManager packetManager;
 
 	// Connection states
 	enum class ConnectionState
@@ -435,6 +462,10 @@ private:
 
 	// Private methods
 	uint64_t getCurrentTimeMs();
+	void sendChatMessage(const std::string& sender, const std::string& message, bool isGlobal);
+	void sendSystemMessage(const std::string& message);
+	void sendCommand(const std::string& command, const std::vector<std::string>& args);
+	void sendTeleport(const Position& position);
 	void updateBandwidthStats();
 	bool isPacketSendAllowed(const std::string& message, float size);
 	MessageTypeConfig getMessageConfig(const std::string& message);

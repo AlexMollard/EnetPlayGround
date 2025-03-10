@@ -188,3 +188,22 @@ std::string Utils::getEnvVar(const std::string& key)
 	return val == nullptr ? std::string() : std::string(val);
 #endif
 }
+
+// Join strings with a delimiter
+std::string Utils::joinStrings(const std::vector<std::string>& strings, const std::string& delimiter)
+{
+	std::string result;
+	bool first = true;
+
+	for (const auto& str: strings)
+	{
+		if (!first)
+		{
+			result += delimiter;
+		}
+		result += str;
+		first = false;
+	}
+
+	return result;
+}

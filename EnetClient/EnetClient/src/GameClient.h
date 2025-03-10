@@ -11,31 +11,12 @@
 #include "AuthManager.h"
 #include "Logger.h"
 #include "NetworkManager.h"
+#include "PacketTypes.h"
 #include "ThemeManager.h"
 
 //=============================================================================
 // DATA STRUCTURES
 //=============================================================================
-
-/**
- * Position structure representing a 3D coordinate
- */
-struct Position
-{
-	float x = 0.0f;
-	float y = 0.0f;
-	float z = 0.0f;
-
-	bool operator==(const Position& other) const
-	{
-		return x == other.x && y == other.y && z == other.z;
-	}
-
-	bool operator!=(const Position& other) const
-	{
-		return !(*this == other);
-	}
-};
 
 /**
  * Player information structure
@@ -47,16 +28,6 @@ struct PlayerInfo
 	Position position;
 	time_t lastSeen = 0;
 	std::string status;
-};
-
-/**
- * Chat message structure
- */
-struct ChatMessage
-{
-	std::string sender;
-	std::string content;
-	time_t timestamp = 0;
 };
 
 /**
@@ -147,6 +118,7 @@ private:
 	std::shared_ptr<NetworkManager> networkManager;
 	std::shared_ptr<AuthManager> authManager;
 	Logger logger;
+	ENetPeer* server = nullptr;
 
 	// Player data
 	uint32_t myPlayerId = 0;
@@ -315,11 +287,13 @@ private:
      */
 	std::vector<std::string> splitString(const std::string& str, char delimiter);
 
-	/**
-     * Parse world state update
-     * @param stateData State data to parse
-     */
-	void parseWorldState(const std::string& stateData);
+	// New packet-specific handlers
+	void handleAuthResponse(const GameProtocol::AuthResponsePacket& packet);
+	void handlePositionUpdate(const GameProtocol::PositionUpdatePacket& packet);
+	void handleChatMessage(const GameProtocol::ChatMessagePacket& packet);
+	void handleSystemMessage(const GameProtocol::SystemMessagePacket& packet);
+	void handleTeleport(const GameProtocol::TeleportPacket& packet);
+	void handleWorldState(const GameProtocol::WorldStatePacket& packet);
 
 	/**
      * Add a chat message

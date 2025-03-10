@@ -1,8 +1,8 @@
 #pragma once
 
-#include <vector>
-#include <string>
 #include <enet/enet.h>
+#include <string>
+#include <vector>
 
 // Helper utilities
 class Utils
@@ -34,4 +34,7 @@ public:
 
 	// A C++ safe way of getting environment variables
 	static std::string getEnvVar(const std::string& key);
+
+	// Join strings with a delimiter
+	static std::string joinStrings(const std::vector<std::string>& strings, const std::string& delimiter);
 };

@@ -66,7 +66,7 @@ void NetworkDiagnostics::reset()
 
 // Constructor with enhanced initialization
 NetworkManager::NetworkManager(Logger& logger, std::shared_ptr<ThreadManager> threadManager)
-      : logger(logger), bandwidthTokenBucket(0, 0), threadManager(threadManager) // Will be properly initialized later
+      : logger(logger), bandwidthTokenBucket(0, 0), threadManager(threadManager), packetManager(logger)
 {
 	logger.debug("Initializing Enhanced NetworkManager");
 
@@ -566,9 +566,9 @@ void NetworkManager::cleanExpiredPackets()
 	        });
 }
 
-void NetworkManager::sendPacket(const std::string& message, bool reliable)
+void NetworkManager::sendPacket(std::shared_ptr<GameProtocol::Packet> packet, bool reliable)
 {
-	// Check connection state locally rather than through a blocking call
+	// Check connection state locally
 	bool currentlyConnected = false;
 	{
 		std::lock_guard<std::mutex> guard(connectionStateMutex);
@@ -577,7 +577,7 @@ void NetworkManager::sendPacket(const std::string& message, bool reliable)
 
 	if (!currentlyConnected)
 	{
-		// Check for packet queueing locally rather than with a blocking call
+		// Check for packet queueing
 		bool shouldQueue = queuePacketsDuringDisconnection;
 
 		// Queue the packet if enabled
@@ -585,122 +585,120 @@ void NetworkManager::sendPacket(const std::string& message, bool reliable)
 		{
 			uint8_t priority = PRIORITY_NORMAL;
 
-			// Determine priority based on message type (no blocking call)
-			for (const auto& configPair: messageTypeConfigs)
+			// Determine priority based on packet type
+			GameProtocol::PacketType packetType = packet->getType();
+
+			// Set priority based on packet type
+			switch (packetType)
 			{
-				if (!configPair.first.empty() && message.find(configPair.first) == 0)
-				{
-					priority = configPair.second.priority;
+				case GameProtocol::PacketType::AuthRequest:
+				case GameProtocol::PacketType::Heartbeat:
+				case GameProtocol::PacketType::Disconnect:
+					priority = PRIORITY_CRITICAL;
 					break;
-				}
+
+				case GameProtocol::PacketType::ChatMessage:
+				case GameProtocol::PacketType::SystemMessage:
+				case GameProtocol::PacketType::Whisper:
+					priority = PRIORITY_HIGH;
+					break;
+
+				case GameProtocol::PacketType::PositionUpdate:
+				case GameProtocol::PacketType::DeltaPositionUpdate:
+					priority = PRIORITY_NORMAL;
+					break;
+
+				default:
+					priority = PRIORITY_NORMAL;
+					break;
 			}
 
-			sendPacketWithPriority(message, reliable, priority);
+			// Convert to binary and queue
+			std::vector<uint8_t> data = packet->serialize();
+			std::string dataStr(reinterpret_cast<const char*>(data.data()), data.size());
+			queuePacket(dataStr, reliable, priority);
 		}
 		return;
 	}
 
-	// Validate message
-	if (message.empty())
+	// Get server peer
+	ENetPeer* serverPeer = getServerPeer();
+	if (!serverPeer)
 	{
-		logger.error("Attempted to send empty packet");
-		std::lock_guard<std::mutex> guard(diagnosticsMutex);
-		diagnostics.packetCreationErrors++;
+		logger.error("Cannot send packet - server peer not available");
 		return;
 	}
 
-	// Check bandwidth limits directly instead of with blocking call
-	uint32_t packetSize = static_cast<uint32_t>(message.length() + 28);
-	if (message.length() > UINT32_MAX - 28)
+	// Use the packet manager to send the packet
+	packetManager.sendPacket(serverPeer, *packet, reliable);
+
+	// Update statistics
+	GameProtocol::PacketType packetType = packet->getType();
+	std::string packetTypeName;
+
+	// Convert packet type to string for logging
+	switch (packetType)
 	{
-		logger.error("Message too large to process");
-		return;
+		case GameProtocol::PacketType::AuthRequest:
+			packetTypeName = "AuthRequest";
+			break;
+		case GameProtocol::PacketType::AuthResponse:
+			packetTypeName = "AuthResponse";
+			break;
+		case GameProtocol::PacketType::ChatMessage:
+			packetTypeName = "ChatMessage";
+			break;
+		case GameProtocol::PacketType::SystemMessage:
+			packetTypeName = "SystemMessage";
+			break;
+		case GameProtocol::PacketType::Command:
+			packetTypeName = "Command";
+			break;
+		case GameProtocol::PacketType::PositionUpdate:
+			packetTypeName = "PositionUpdate";
+			break;
+		case GameProtocol::PacketType::DeltaPositionUpdate:
+			packetTypeName = "DeltaPositionUpdate";
+			break;
+		case GameProtocol::PacketType::Heartbeat:
+			packetTypeName = "Heartbeat";
+			break;
+		default:
+			packetTypeName = "Unknown";
+			break;
 	}
 
-	if (!isPacketSendAllowed(message, (float)packetSize))
+	// Don't log position updates and heartbeats to avoid spam
+	if (packetType != GameProtocol::PacketType::PositionUpdate && packetType != GameProtocol::PacketType::DeltaPositionUpdate && packetType != GameProtocol::PacketType::Heartbeat)
 	{
-		if (message.substr(0, 9) != "POSITION:" && message.substr(0, 5) != "PING:")
-		{
-			logger.debug("Packet throttled due to bandwidth limits: " + message.substr(0, 20) + "...");
-		}
-		return;
+		logger.logNetworkEvent("Sent packet of type: " + packetTypeName);
 	}
+}
 
-	// Process packet sending
-	threadManager->scheduleResourceTask({ GameResources::networkResourceId, GameResources::bandwidthResourceId },
-	        [this, message, reliable, packetSize]()
+void NetworkManager::queuePacket(const std::string& data, bool reliable, uint8_t priority)
+{
+	threadManager->scheduleResourceTask({ GameResources::queueResourceId },
+	        [this, data, reliable, priority]()
 	        {
-		        std::string packetData = message;
-		        float compressionRatio = 1.0f;
-
-		        if (compressionEnabled && message.length() >= minSizeForCompression)
+		        // Check if queue has room
+		        if (outgoingQueue.size() < maxQueueSize)
 		        {
-			        // Get message-specific compression threshold
-			        float threshold = minCompressionRatio;
-			        for (const auto& configPair: messageTypeConfigs)
-			        {
-				        if (!configPair.first.empty() && message.find(configPair.first) == 0)
-				        {
-					        // In this implementation we're using the throttleMultiplier as the compression threshold
-					        // for simplicity, but in a real implementation you might want separate configuration
-					        threshold = configPair.second.throttleMultiplier;
-					        break;
-				        }
-			        }
+			        // Create queued packet with current time
+			        QueuedPacket packet(data, reliable, priority);
+			        packet.timestamp = getCurrentTimeMs();
+			        outgoingQueue.push(packet);
 
-			        // Compress the message
-			        std::string compressed = compressMessage(message, &compressionRatio);
-
-			        // Only use compression if it actually helps enough
-			        if (compressionRatio <= threshold)
-			        {
-				        // Prefix the message with compression info
-				        packetData = "COMP:" + compressed;
-			        }
-		        }
-
-		        // Create packet inside the lock
-		        ENetPacket* packet = enet_packet_create(packetData.c_str(), packetData.length(), reliable ? ENET_PACKET_FLAG_RELIABLE : 0);
-
-		        if (packet == nullptr)
-		        {
-			        logger.error("Failed to create packet: Memory allocation failed");
-			        diagnostics.packetCreationErrors++;
-			        return;
-		        }
-
-		        // Send packet while holding the lock
-		        bool sendSuccess = (enet_peer_send(server, 0, packet) == 0);
-
-		        if (sendSuccess)
-		        {
-			        // Update stats
-			        packetsSent++;
-			        bytesSent += packetData.length();
-			        bandwidthStats.bytesSentLastSecond += packetData.length();
-			        lastNetworkActivity = getCurrentTimeMs();
-
-			        // Don't spam logs with position updates and pings
-			        if (message.substr(0, 9) != "POSITION:" && message.substr(0, 5) != "PING:")
-			        {
-				        std::string logMessage = "Sent: " + message;
-				        if (packetData != message)
-				        {
-					        logMessage += " (compressed to " + std::to_string(static_cast<int>(compressionRatio * 100)) + "%)";
-				        }
-				        logger.logNetworkEvent(logMessage);
-			        }
+			        logger.debug("Queued packet (priority=" + std::to_string(priority) + ")");
 		        }
 		        else
 		        {
-			        logger.error("Failed to send packet: " + message);
-			        diagnostics.packetSendErrors++;
-			        enet_packet_destroy(packet); // We need to destroy the packet if send failed
+			        // Queue is full, drop the packet
+			        logger.warning("Packet queue full, dropping packet");
 		        }
 	        });
 }
 
-void NetworkManager::sendPacketWithPriority(const std::string& message, bool reliable, uint8_t priority)
+void NetworkManager::sendPacketWithPriority(std::shared_ptr<GameProtocol::Packet> packet, bool reliable, uint8_t priority)
 {
 	// Check if we're connected for the fast path
 	bool currentlyConnected = threadManager->scheduleReadTaskWithResult({ GameResources::networkResourceId }, [this]() -> bool { return isConnected && connectionState == ConnectionState::CONNECTED; }).get();
@@ -708,7 +706,7 @@ void NetworkManager::sendPacketWithPriority(const std::string& message, bool rel
 	if (currentlyConnected)
 	{
 		// Send directly if connected
-		sendPacket(message, reliable);
+		sendPacket(packet, reliable);
 		return;
 	}
 
@@ -717,23 +715,31 @@ void NetworkManager::sendPacketWithPriority(const std::string& message, bool rel
 
 	if (shouldQueue)
 	{
+		// Serialize the packet to binary data for queueing
+		std::vector<uint8_t> serializedData = packet->serialize();
+		std::string dataStr(reinterpret_cast<const char*>(serializedData.data()), serializedData.size());
+
+		// Get packet type for logging
+		GameProtocol::PacketType packetType = packet->getType();
+		std::string packetTypeName = GameProtocol::getPacketTypeName(packetType);
+
 		threadManager->scheduleResourceTask({ GameResources::queueResourceId },
-		        [this, message, reliable, priority]()
+		        [this, dataStr, reliable, priority, packetTypeName]()
 		        {
 			        // Check if queue has room
 			        if (outgoingQueue.size() < maxQueueSize)
 			        {
 				        // Create queued packet with current time
-				        QueuedPacket packet(message, reliable, priority);
+				        QueuedPacket packet(dataStr, reliable, priority);
 				        packet.timestamp = getCurrentTimeMs();
 				        outgoingQueue.push(packet);
 
-				        logger.debug("Queued packet during disconnection (priority=" + std::to_string(priority) + "): " + (message.length() > 50 ? message.substr(0, 47) + "..." : message));
+				        logger.debug("Queued packet during disconnection (priority=" + std::to_string(priority) + ", type=" + packetTypeName + ")");
 			        }
 			        else
 			        {
 				        // Queue is full, drop the packet
-				        logger.warning("Packet queue full, dropping packet: " + (message.length() > 50 ? message.substr(0, 47) + "..." : message));
+				        logger.warning("Packet queue full, dropping packet of type: " + packetTypeName);
 			        }
 		        });
 	}
@@ -751,6 +757,14 @@ void NetworkManager::processQueuedPackets()
 	if (!canProcessQueue)
 	{
 		logger.debug("Not processing queued packets - not connected");
+		return;
+	}
+
+	// Get server peer
+	ENetPeer* serverPeer = getServerPeer();
+	if (!serverPeer)
+	{
+		logger.warning("Cannot process queued packets - server peer not available");
 		return;
 	}
 
@@ -789,10 +803,118 @@ void NetworkManager::processQueuedPackets()
 			break;
 		}
 
-		// Send each packet
+		// Process each packet and convert to the new format
 		for (const auto& packet: packetsToProcess)
 		{
-			sendPacket(packet.message, packet.reliable);
+			// Try to determine the packet type from the legacy message format
+			if (packet.message.substr(0, 5) == "AUTH:")
+			{
+				// Parse the auth message (AUTH:username,password)
+				size_t commaPos = packet.message.find(',', 5);
+				if (commaPos != std::string::npos)
+				{
+					std::string username = packet.message.substr(5, commaPos - 5);
+					std::string password = packet.message.substr(commaPos + 1);
+
+					// Create and send auth request packet
+					auto authPacket = packetManager.createAuthRequest(username, password);
+					packetManager.sendPacket(serverPeer, *authPacket, true);
+				}
+			}
+			else if (packet.message.substr(0, 5) == "PING:")
+			{
+				// Create and send heartbeat packet
+				auto heartbeatPacket = packetManager.createHeartbeat(static_cast<uint32_t>(getCurrentTimeMs()));
+				packetManager.sendPacket(serverPeer, *heartbeatPacket, true);
+			}
+			else if (packet.message.substr(0, 9) == "POSITION:")
+			{
+				// Parse the position message (POSITION:x,y,z)
+				try
+				{
+					std::string posStr = packet.message.substr(9);
+					std::vector<float> coords;
+
+					// Parse comma-separated coordinates
+					size_t start = 0, end = 0;
+					while ((end = posStr.find(',', start)) != std::string::npos)
+					{
+						coords.push_back(std::stof(posStr.substr(start, end - start)));
+						start = end + 1;
+					}
+					coords.push_back(std::stof(posStr.substr(start))); // Last coordinate
+
+					if (coords.size() >= 3)
+					{
+						Position pos;
+						pos.x = coords[0];
+						pos.y = coords[1];
+						pos.z = coords[2];
+
+						// Create and send position update packet
+						auto posPacket = packetManager.createPositionUpdate(0, pos); // PlayerID not available from queue, use 0
+						packetManager.sendPacket(serverPeer, *posPacket, false);
+					}
+				}
+				catch (const std::exception& e)
+				{
+					logger.error("Failed to parse queued position: " + std::string(e.what()));
+				}
+			}
+			else if (packet.message.substr(0, 10) == "MOVE_DELTA:")
+			{
+				// Parse delta position message (more complex, would need parsing logic)
+				// For simplicity, we'll just send a full position update instead
+				logger.debug("Queued delta position updates not supported, skipping");
+			}
+			else if (packet.message.substr(0, 5) == "CHAT:")
+			{
+				// Parse chat message (CHAT:message)
+				std::string message = packet.message.substr(5);
+
+				// Create and send chat message packet
+				// Note: For simplicity, we'll use "Queued" as the sender name
+				auto chatPacket = packetManager.createChatMessage("Queued", message);
+				packetManager.sendPacket(serverPeer, *chatPacket, true);
+			}
+			else if (packet.message.substr(0, 8) == "COMMAND:")
+			{
+				// Parse command message (COMMAND:command args...)
+				std::string commandText = packet.message.substr(8);
+
+				// Split into command and args
+				std::vector<std::string> args;
+				std::string command;
+
+				size_t spacePos = commandText.find(' ');
+				if (spacePos != std::string::npos)
+				{
+					command = commandText.substr(0, spacePos);
+
+					// Parse arguments
+					std::string argsStr = commandText.substr(spacePos + 1);
+					std::istringstream iss(argsStr);
+					std::string arg;
+
+					while (iss >> arg)
+					{
+						args.push_back(arg);
+					}
+				}
+				else
+				{
+					command = commandText;
+				}
+
+				// Create and send command packet
+				auto commandPacket = packetManager.createCommand(command, args);
+				packetManager.sendPacket(serverPeer, *commandPacket, true);
+			}
+			else
+			{
+				// Unknown packet type, log and skip
+				logger.warning("Unknown queued packet type: " + packet.message.substr(0, 20) + "...");
+			}
 		}
 
 		// Small delay between batches
@@ -867,60 +989,41 @@ void NetworkManager::sendPositionUpdate(float x, float y, float z, float lastX, 
 	if (moveDistance < movementThreshold)
 		return;
 
-	// Adjust precision based on population density
-	int precision = threadManager->scheduleReadTaskWithResult({ GameResources::networkResourceId }, [this]() -> int { return positionPrecision; }).get();
-
-	std::ostringstream xStr, yStr, zStr;
-	xStr << std::fixed << std::setprecision(precision) << x;
-	yStr << std::fixed << std::setprecision(precision) << y;
-	zStr << std::fixed << std::setprecision(precision) << z;
-
-	// Prepare position update message
-	std::string positionMsg;
-
-	if (useCompressedUpdates)
+	// Get the server peer
+	ENetPeer* serverPeer = getServerPeer();
+	if (!serverPeer)
 	{
-		// Delta compression: Send only the coordinates that changed significantly
-		positionMsg = "MOVE_DELTA:";
-		bool addedCoordinate = false;
+		return;
+	}
 
-		if (std::abs(x - lastX) >= movementThreshold)
-		{
-			positionMsg += "x" + xStr.str();
-			addedCoordinate = true;
-		}
+	// Create the position struct
+	Position position;
+	position.x = x;
+	position.y = y;
+	position.z = z;
 
-		if (std::abs(y - lastY) >= movementThreshold)
-		{
-			if (addedCoordinate)
-				positionMsg += ",";
-			positionMsg += "y" + yStr.str();
-			addedCoordinate = true;
-		}
-
-		if (std::abs(z - lastZ) >= movementThreshold)
-		{
-			if (addedCoordinate)
-				positionMsg += ",";
-			positionMsg += "z" + zStr.str();
-			addedCoordinate = true;
-		}
-
-		// Make sure we have at least one coordinate
-		if (!addedCoordinate)
-		{
-			// Fallback to full update if no individual coordinate meets threshold
-			positionMsg = "POSITION:" + xStr.str() + "," + yStr.str() + "," + zStr.str();
-		}
+	if (useCompressedUpdates && moveDistance >= movementThreshold)
+	{
+		// Use delta position update for optimized bandwidth
+		auto deltaPacket = packetManager.createDeltaPositionUpdate(position);
+		packetManager.sendPacket(serverPeer, *deltaPacket, false); // Unreliable for position
 	}
 	else
 	{
-		// Full position update (fallback method)
-		positionMsg = "POSITION:" + xStr.str() + "," + yStr.str() + "," + zStr.str();
+		// Use full position update (more bandwidth but simpler)
+		// Note: We need a player ID for this, should be obtained from auth response
+		uint32_t playerId = 0; // Would need to get this from somewhere, e.g. auth manager
+		auto posPacket = packetManager.createPositionUpdate(playerId, position);
+		packetManager.sendPacket(serverPeer, *posPacket, false); // Unreliable for position
 	}
 
-	// Use unreliable packets for position updates
-	sendPacket(positionMsg, false);
+	// Update bandwidth statistics
+	threadManager->scheduleResourceTask({ GameResources::bandwidthResourceId },
+	        [this]()
+	        {
+		        // Update network activity timestamp
+		        lastNetworkActivity = getCurrentTimeMs();
+	        });
 }
 
 // The update method needs refactoring to use ThreadManager
@@ -963,62 +1066,93 @@ void NetworkManager::update(const std::function<void()>& updatePositionCallback,
 			{
 				case ENET_EVENT_TYPE_RECEIVE:
 				{
-					// Extract packet data
-					std::string packetData(reinterpret_cast<const char*>(event.packet->data), event.packet->dataLength);
-
-					// Check if this is a compressed packet
-					if (packetData.substr(0, 5) == "COMP:")
-					{
-						try
-						{
-							// Extract compressed data
-							std::string compressedData = packetData.substr(5);
-
-							// Decompress
-							packetData = decompressMessage(compressedData);
-						}
-						catch (std::exception& e)
-						{
-							logger.error("Error decompressing packet: " + std::string(e.what()));
-							// Continue with the original data
-						}
-					}
-
 					// Update stats
 					packetsReceived++;
 					bytesReceived += event.packet->dataLength;
 					bandwidthStats.bytesReceivedLastSecond += event.packet->dataLength;
 					lastNetworkActivity = getCurrentTimeMs();
 
-					// Try to process as an auth packet first
-					bool handled = processReceivedPacket(packetData.c_str(), packetData.length());
+					// Try to process the packet with the PacketManager
+					auto receivedPacket = packetManager.receivePacket(event.packet);
 
-					// If not handled as an auth packet and we have a callback
-					if (!handled && handlePacketCallback)
+					if (receivedPacket)
 					{
-						try
-						{
-							// We need to create a copy of the packet for the callback
-							ENetPacket* packetCopy = enet_packet_create(packetData.c_str(), packetData.length(), event.packet->flags);
+						// Successfully parsed as a structured packet
+						// logger.info("Received packet of type: " + GameProtocol::getPacketTypeName(receivedPacket->getType())); // Uncomment when debugging
 
-							if (packetCopy)
-							{
-								// Use thread manager for packet handling
-								threadManager->scheduleNetworkTask(
-								        [callback = handlePacketCallback, packet = packetCopy]()
-								        {
-									        callback(packet);
-									        enet_packet_destroy(packet); // Clean up after use
-								        });
-							}
-							else
-							{
-								logger.error("Failed to create packet copy");
-							}
-						}
-						catch (std::exception& e)
+						// Check if it's a packet we handle internally
+						switch (receivedPacket->getType())
 						{
-							logger.error("Error in packet callback: " + std::string(e.what()));
+							case GameProtocol::PacketType::AuthResponse:
+								// Handle auth response
+								if (authManager)
+								{
+									// Forward to auth manager
+									authManager->processAuthResponse(event.packet->data, event.packet->dataLength, nullptr, nullptr);
+								}
+								break;
+
+							case GameProtocol::PacketType::Heartbeat:
+								// Handle heartbeat as ping response
+								if (waitingForPingResponse)
+								{
+									// Process ping response
+									uint64_t currentTime = getCurrentTimeMs();
+									uint32_t pingTime = static_cast<uint32_t>(currentTime - lastPingSentTime);
+									pingMs = pingTime;
+									waitingForPingResponse = false;
+
+									// Reset failure counter on successful ping
+									successivePingFailures = 0;
+
+									// Adaptively decrease timeout
+									if (adaptiveTimeoutMultiplier > 1 && pingTime * 3 < serverResponseTimeout)
+									{
+										adaptiveTimeoutMultiplier--;
+										serverResponseTimeout = initialServerResponseTimeout * adaptiveTimeoutMultiplier;
+										logger.debug("Decreased server response timeout to " + std::to_string(serverResponseTimeout) + "ms");
+									}
+
+									// Update ping statistics
+									updatePingStatistics(pingTime);
+								}
+								break;
+
+							default:
+								// Pass to the callback handler if provided
+								if (handlePacketCallback)
+								{
+									try
+									{
+										// Schedule in thread pool to avoid blocking
+										// create a copy of the packet before passing it to the callback as the packet could be destroyed before the callback is executed
+										ENetPacket* packetCopy = enet_packet_create(event.packet->data, event.packet->dataLength, event.packet->flags);
+										threadManager->scheduleNetworkTask([callback = handlePacketCallback, packet = packetCopy]() { callback(packet); });
+									}
+									catch (std::exception& e)
+									{
+										logger.error("Error in packet callback: " + std::string(e.what()));
+									}
+								}
+								break;
+						}
+					}
+					else
+					{
+						// Not a recognized structured packet, pass to callback
+						if (handlePacketCallback)
+						{
+							try
+							{
+								// Schedule in thread pool to avoid blocking
+								// create a copy of the packet before passing it to the callback as the packet could be destroyed before the callback is executed
+								ENetPacket* packetCopy = enet_packet_create(event.packet->data, event.packet->dataLength, event.packet->flags);
+								threadManager->scheduleNetworkTask([callback = handlePacketCallback, packet = packetCopy]() { callback(packet); });
+							}
+							catch (std::exception& e)
+							{
+								logger.error("Error in packet callback: " + std::string(e.what()));
+							}
 						}
 					}
 
@@ -1028,8 +1162,21 @@ void NetworkManager::update(const std::function<void()>& updatePositionCallback,
 
 				case ENET_EVENT_TYPE_DISCONNECT:
 					logger.warning("Disconnected from server");
-					disconnectCallback();
-					
+
+					// Schedule disconnect callback
+					if (disconnectCallback)
+					{
+						threadManager->scheduleTask(disconnectCallback);
+					}
+
+					// Update connection state
+					{
+						std::lock_guard<std::mutex> guard(connectionStateMutex);
+						isConnected = false;
+						connectionState = ConnectionState::DISCONNECTED;
+						server = nullptr;
+					}
+
 					return; // Exit early on disconnect
 
 				default:
@@ -1098,8 +1245,16 @@ void NetworkManager::sendHeartbeat()
 
 	threadManager->scheduleResourceTask({ GameResources::networkResourceId }, [this, currentTime]() { lastHeartbeatSent = currentTime; });
 
-	std::string heartbeatMsg = "HEARTBEAT";
-	sendPacket(heartbeatMsg, false); // Using unreliable for heartbeats
+	// Get server peer
+	ENetPeer* serverPeer = getServerPeer();
+	if (!serverPeer)
+	{
+		return;
+	}
+
+	// Create and send a heartbeat packet
+	auto heartbeatPacket = packetManager.createHeartbeat(static_cast<uint32_t>(currentTime));
+	packetManager.sendPacket(serverPeer, *heartbeatPacket, false); // Using unreliable for heartbeats
 }
 
 void NetworkManager::sendPing()
@@ -1180,8 +1335,18 @@ void NetworkManager::sendPing()
 	// Send ping with sequence number if needed
 	if (shouldSendPing)
 	{
-		std::string pingMsg = "PING:" + std::to_string(currentTime) + ":" + std::to_string(currentPingSequence);
-		sendPacket(pingMsg, true); // Using reliable for pings for better detection
+		// Get server peer
+		ENetPeer* serverPeer = getServerPeer();
+		if (!serverPeer)
+		{
+			return;
+		}
+
+		// Create heartbeat packet with current time as client time
+		auto heartbeatPacket = packetManager.createHeartbeat(static_cast<uint32_t>(currentTime));
+
+		// Send the packet reliably for better detection
+		packetManager.sendPacket(serverPeer, *heartbeatPacket, true);
 	}
 
 	// Handle ping timeout
@@ -1697,10 +1862,20 @@ void NetworkManager::estimatePacketLoss()
 // Process a received packet
 bool NetworkManager::processReceivedPacket(const void* packetData, size_t packetLength)
 {
-	std::string message(reinterpret_cast<const char*>(packetData), packetLength);
+	// Create a span from the packet data
+	std::span<const uint8_t> data(static_cast<const uint8_t*>(packetData), packetLength);
 
-	// Check if this is an authentication response
-	if (message.substr(0, 14) == "AUTH_RESPONSE:")
+	// Try to deserialize the packet
+	auto packet = GameProtocol::deserializePacket(data);
+
+	// If deserialization failed, return false
+	if (!packet)
+	{
+		return false;
+	}
+
+	// Check packet type
+	if (packet->getType() == GameProtocol::PacketType::AuthResponse)
 	{
 		if (authManager)
 		{
@@ -2106,25 +2281,6 @@ void NetworkManager::prepareForZoneTransition()
 	        });
 }
 
-// Set area of interest
-void NetworkManager::setAreaOfInterest(const std::string& areaId, int radius)
-{
-	// First send the AOI packet
-	std::string aoiMessage = "AOI:" + areaId + ":" + std::to_string(radius);
-	sendPacketWithPriority(aoiMessage, true, PRIORITY_HIGH);
-
-	// Then update area of interest values
-	threadManager->scheduleResourceTask({ GameResources::networkResourceId },
-	        [this, areaId, radius]()
-	        {
-		        // Store current area of interest
-		        currentAreaOfInterest = areaId;
-		        areaOfInterestRadius = radius;
-
-		        logger.debug("Set area of interest: " + areaId + ", radius=" + std::to_string(radius));
-	        });
-}
-
 // Adapt to high population density
 void NetworkManager::adaptToHighPopulationDensity(bool highDensity)
 {
@@ -2315,4 +2471,29 @@ void NetworkManager::resetStats()
 uint64_t NetworkManager::getCurrentTimeMs()
 {
 	return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+}
+
+// Helper packet methods
+void NetworkManager::sendChatMessage(const std::string& sender, const std::string& message, bool isGlobal)
+{
+	auto chatPacket = packetManager.createChatMessage(sender, message, isGlobal);
+	sendPacket(chatPacket, true); // Chat messages should be reliable
+}
+
+void NetworkManager::sendSystemMessage(const std::string& message)
+{
+	auto sysPacket = packetManager.createSystemMessage(message);
+	sendPacket(sysPacket, true); // System messages should be reliable
+}
+
+void NetworkManager::sendCommand(const std::string& command, const std::vector<std::string>& args)
+{
+	auto cmdPacket = packetManager.createCommand(command, args);
+	sendPacket(cmdPacket, true); // Commands should be reliable
+}
+
+void NetworkManager::sendTeleport(const Position& position)
+{
+	auto teleportPacket = packetManager.createTeleport(position);
+	sendPacket(teleportPacket, true); // Teleports should be reliable
 }

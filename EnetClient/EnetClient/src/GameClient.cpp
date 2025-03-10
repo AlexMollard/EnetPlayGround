@@ -128,14 +128,17 @@ void GameClient::applyTheme()
 	themeManager.applyTheme();
 }
 
-// Send a chat message
+// Send a chat message using the new packet system
 void GameClient::sendChatMessage(const std::string& message)
 {
 	if (!authManager->isAuthenticated() || message.empty())
 		return;
 
-	std::string chatMsg = "CHAT:" + message;
-	networkManager->sendPacket(chatMsg);
+	// Create a chat message packet
+	auto chatPacket = networkManager->GetPacketManager()->createChatMessage(myPlayerName, message);
+
+	// Send the packet
+	networkManager->GetPacketManager()->sendPacket(server, *chatPacket, true);
 
 	// Also add to local chat
 	addChatMessage("You", message);
@@ -155,52 +158,67 @@ void GameClient::processChatCommand(const std::string& command)
 		// Extract command and arguments
 		std::string cmd = command.substr(1);
 		size_t spacePos = cmd.find(' ');
-		std::string args;
+		std::vector<std::string> args;
+		std::string baseCmd;
 
 		if (spacePos != std::string::npos)
 		{
-			args = cmd.substr(spacePos + 1);
-			cmd = cmd.substr(0, spacePos);
+			baseCmd = cmd.substr(0, spacePos);
+			std::string argsStr = cmd.substr(spacePos + 1);
+
+			// Parse arguments
+			size_t start = 0;
+			size_t end = 0;
+			while ((end = argsStr.find(' ', start)) != std::string::npos)
+			{
+				args.push_back(argsStr.substr(start, end - start));
+				start = end + 1;
+			}
+			args.push_back(argsStr.substr(start));
+		}
+		else
+		{
+			baseCmd = cmd;
 		}
 
 		// Convert command to lowercase
-		std::transform(cmd.begin(), cmd.end(), cmd.begin(), [](unsigned char c) { return std::tolower(c); });
+		std::transform(baseCmd.begin(), baseCmd.end(), baseCmd.begin(), [](unsigned char c) { return std::tolower(c); });
 
 		// Add the command to the chat
 		addChatMessage("You - command", command);
 
 		// Process local-only commands
-		if (cmd == "quit" || cmd == "exit")
+		if (baseCmd == "quit" || baseCmd == "exit")
 		{
 			shouldExit = true;
 			return;
 		}
-		else if (cmd == "clear")
+		else if (baseCmd == "clear")
 		{
 			clearChatMessages();
 			return;
 		}
-		else if (cmd == "debug")
+		else if (baseCmd == "debug")
 		{
 			showDebug = !showDebug;
 			logger.setLogLevel(LogLevel::DEBUG);
 			addChatMessage("System", "Debug mode " + std::string(showDebug ? "enabled" : "disabled"));
 			return;
 		}
-		else if (cmd == "stats")
+		else if (baseCmd == "stats")
 		{
 			showStats = !showStats;
 			addChatMessage("System", "Network stats display " + std::string(showStats ? "enabled" : "disabled"));
 			return;
 		}
-		else if (cmd == "reconnect")
+		else if (baseCmd == "reconnect")
 		{
 			addChatMessage("System", "Attempting to reconnect...");
 			// Use the NetworkManager instead of calling reconnectToServer directly
 			networkManager->reconnectToServer();
 			return;
 		}
-		else if (cmd == "signout" || cmd == "logout")
+		else if (baseCmd == "signout" || baseCmd == "logout")
 		{
 			signOut();
 			return;
@@ -209,10 +227,13 @@ void GameClient::processChatCommand(const std::string& command)
 		// Send all other commands to the server
 		if (networkManager->isConnectedToServer() && authManager->isAuthenticated())
 		{
-			std::string commandMsg = "COMMAND:" + command.substr(1); // Remove the leading '/'
-			// Use the NetworkManager to send packets
-			networkManager->sendPacket(commandMsg, true);
-			logger.debug("Sent command to server: " + commandMsg);
+			// Create command packet
+			auto commandPacket = networkManager->GetPacketManager()->createCommand(baseCmd, args);
+
+			// Send the packet
+			networkManager->GetPacketManager()->sendPacket(server, *commandPacket, true);
+
+			logger.debug("Sent command to server: " + baseCmd + " with " + std::to_string(args.size()) + " arguments");
 		}
 		else
 		{
@@ -226,234 +247,216 @@ void GameClient::processChatCommand(const std::string& command)
 	}
 }
 
-// Handle received packet
-void GameClient::handlePacket(const ENetPacket* packet)
+// Handle received packet with the new packet system
+void GameClient::handlePacket(const ENetPacket* enetPacket)
 {
-	std::string message(reinterpret_cast<const char*>(packet->data), packet->dataLength);
+	// Process the packet using the PacketManager
+	auto packet = networkManager->GetPacketManager()->receivePacket(enetPacket);
 
-	if (message.substr(0, 13) == "REG_RESPONSE:")
+	// Check if we got a valid packet
+	if (!packet)
 	{
-		std::string response = message.substr(13);
-
-		if (response.substr(0, 7) == "SUCCESS")
-		{
-			// Registration successful
-			logger.info("Registration successful!");
-			connectionState = ConnectionState::LoginScreen;
-
-			// Auto-fill login credentials
-			strncpy_s(loginUsernameBuffer, registerUsernameBuffer, sizeof(loginUsernameBuffer));
-			strncpy_s(loginPasswordBuffer, registerPasswordBuffer, sizeof(loginPasswordBuffer));
-
-			// Clear registration form
-			registerUsernameBuffer[0] = '\0';
-			registerPasswordBuffer[0] = '\0';
-			registerConfirmPasswordBuffer[0] = '\0';
-
-			// We are ready to pass the login screen so clear the chat messages
-			clearChatMessages();
-		}
-		else
-		{
-			// Registration failed
-			registerErrorMessage = "Registration failed: " + response.substr(6);
-			connectionState = ConnectionState::RegisterScreen;
-			networkManager->disconnect(true);
-		}
-
+		logger.error("Received invalid packet");
 		return;
 	}
 
-	if (message.substr(0, 12) != "WORLD_STATE:" && message.substr(0, 5) != "PONG:")
-	{
-		logger.logNetworkEvent("Received: " + message);
-	}
+	// Handle packet based on type
+	GameProtocol::PacketType packetType = packet->getType();
 
-	// Handle different message types
-	if (message.substr(0, 12) == "WORLD_STATE:")
+	switch (packetType)
 	{
-		// Handle world state update
-		parseWorldState(message.substr(12));
-	}
-	else if (message.substr(0, 9) == "POSITION:")
-	{
-		// format: POSITION:x18.254965,y0.000000,z-22.989958
-		// Process chat message from server
-		size_t colonPos = message.find(':', 5);
-		if (colonPos != std::string::npos)
+		case GameProtocol::PacketType::AuthResponse:
 		{
-			std::string x = message.substr(colonPos + 1, message.find(',', colonPos + 1) - colonPos - 1);
-			std::string y = message.substr(message.find(',', colonPos + 1) + 1, message.find(',', message.find(',', colonPos + 1) + 1) - message.find(',', colonPos + 1) - 1);
-			std::string z = message.substr(message.find(',', message.find(',', colonPos + 1) + 1) + 1);
-
-			// Remove the leading 'x', 'y', 'z'
-			x = x.substr(1);
-			y = y.substr(1);
-			z = z.substr(1);
-
-			myPosition.x = std::stof(x);
-			myPosition.y = std::stof(y);
-			myPosition.z = std::stof(z);
-		}
-	}
-	else if (message.substr(0, 5) == "CHAT:")
-	{
-		// Process chat message from server
-		size_t colonPos = message.find(':', 5);
-		if (colonPos != std::string::npos)
-		{
-			std::string sender = message.substr(5, colonPos - 5);
-			// If the sender is the currently authenticated user, skip the message
-			if (sender == myPlayerName)
-				return;
-
-			std::string content = message.substr(colonPos + 1);
-			addChatMessage(sender, content);
-		}
-	}
-	else if (message.substr(0, 5) == "PONG:")
-	{
-		// This is now handled by NetworkManager
-	}
-	else if (message.substr(0, 7) == "SYSTEM:")
-	{
-		// System message from server
-		addChatMessage("Server", message.substr(7));
-	}
-	else if (message.substr(0, 9) == "TELEPORT:")
-	{
-		// Handle teleport message from server
-		try
-		{
-			auto parts = splitString(message.substr(9), ',');
-			if (parts.size() >= 3)
+			auto* authResponse = dynamic_cast<GameProtocol::AuthResponsePacket*>(packet.get());
+			if (authResponse)
 			{
-				float x = std::stof(parts[0]);
-				float y = std::stof(parts[1]);
-				float z = std::stof(parts[2]);
-
-				// Update position
-				myPosition.x = x;
-				myPosition.y = y;
-				myPosition.z = z;
-				lastSentPosition = myPosition; // Prevent immediate position update
+				handleAuthResponse(*authResponse);
 			}
+			break;
 		}
-		catch (const std::exception& e)
+
+		case GameProtocol::PacketType::PositionUpdate:
 		{
-			logger.error("Failed to parse TELEPORT message: " + std::string(e.what()));
+			auto* posUpdate = dynamic_cast<GameProtocol::PositionUpdatePacket*>(packet.get());
+			if (posUpdate)
+			{
+				handlePositionUpdate(*posUpdate);
+			}
+			break;
 		}
-	}
-	else if (message.substr(0, 15) == "COMMAND_RESULT:")
-	{
-		// Handle command results from server
-		addChatMessage("Server", message.substr(15));
+
+		case GameProtocol::PacketType::ChatMessage:
+		{
+			auto* chatMessage = dynamic_cast<GameProtocol::ChatMessagePacket*>(packet.get());
+			if (chatMessage)
+			{
+				handleChatMessage(*chatMessage);
+			}
+			break;
+		}
+
+		case GameProtocol::PacketType::SystemMessage:
+		{
+			auto* sysMessage = dynamic_cast<GameProtocol::SystemMessagePacket*>(packet.get());
+			if (sysMessage)
+			{
+				handleSystemMessage(*sysMessage);
+			}
+			break;
+		}
+
+		case GameProtocol::PacketType::Teleport:
+		{
+			auto* teleport = dynamic_cast<GameProtocol::TeleportPacket*>(packet.get());
+			if (teleport)
+			{
+				handleTeleport(*teleport);
+			}
+			break;
+		}
+
+		case GameProtocol::PacketType::WorldState:
+		{
+			auto* worldState = dynamic_cast<GameProtocol::WorldStatePacket*>(packet.get());
+			if (worldState)
+			{
+				handleWorldState(*worldState);
+			}
+			break;
+		}
+
+		case GameProtocol::PacketType::Heartbeat:
+		{
+			// Just acknowledge heartbeat
+			break;
+		}
+
+		default:
+			logger.warning("Received unhandled packet type: " + std::to_string(static_cast<int>(packetType)));
+			break;
 	}
 }
 
-// Helper function to split strings (similar to the one in server)
-std::vector<std::string> GameClient::splitString(const std::string& str, char delimiter)
+// New handler methods for specific packet types
+void GameClient::handleAuthResponse(const GameProtocol::AuthResponsePacket& packet)
 {
-	std::vector<std::string> tokens;
-	std::stringstream ss(str);
-	std::string token;
-
-	while (std::getline(ss, token, delimiter))
+	if (packet.success)
 	{
-		tokens.push_back(token);
-	}
+		// Authentication successful
+		myPlayerId = packet.playerId;
+		connectionState = ConnectionState::Connected;
 
-	return tokens;
+		// Send a request to get player position
+		auto posRequest = networkManager->GetPacketManager()->createPositionUpdate(myPlayerId, myPosition);
+		networkManager->GetPacketManager()->sendPacket(server, *posRequest, true);
+
+		// Add system message
+		addChatMessage("System", "Login successful! Welcome, " + myPlayerName);
+	}
+	else
+	{
+		// Authentication failed
+		loginErrorMessage = "Authentication failed: " + packet.message;
+		connectionState = ConnectionState::LoginScreen;
+		networkManager->disconnect(true);
+	}
 }
 
-// Parse world state update
-void GameClient::parseWorldState(const std::string& stateData)
+void GameClient::handlePositionUpdate(const GameProtocol::PositionUpdatePacket& packet)
+{
+	// Check if this is our position update
+	if (packet.playerId == myPlayerId)
+	{
+		// Update our position
+		Position pos = packet.position;
+		myPosition.x = pos.x;
+		myPosition.y = pos.y;
+		myPosition.z = pos.z;
+	}
+	else
+	{
+		// Update other player's position
+		std::lock_guard<std::mutex> lock(playersMutex);
+		auto& player = otherPlayers[packet.playerId];
+		player.id = packet.playerId;
+		Position pos = packet.position;
+		player.position.x = pos.x;
+		player.position.y = pos.y;
+		player.position.z = pos.z;
+		player.lastSeen = time(0);
+		player.status = "active";
+	}
+}
+
+void GameClient::handleChatMessage(const GameProtocol::ChatMessagePacket& packet)
+{
+	// Skip our own messages that are echoed back
+	if (packet.sender == myPlayerName)
+		return;
+
+	// Add to chat
+	addChatMessage(packet.sender, packet.message);
+}
+
+void GameClient::handleSystemMessage(const GameProtocol::SystemMessagePacket& packet)
+{
+	addChatMessage("Server", packet.message);
+}
+
+void GameClient::handleTeleport(const GameProtocol::TeleportPacket& packet)
+{
+	// Update position
+	Position pos = packet.position;
+	myPosition.x = pos.x;
+	myPosition.y = pos.y;
+	myPosition.z = pos.z;
+	lastSentPosition = myPosition; // Prevent immediate position update
+
+	// Add system message
+	addChatMessage("System", "You have been teleported to a new location.");
+}
+
+void GameClient::handleWorldState(const GameProtocol::WorldStatePacket& packet)
 {
 	// Mark all players for potential removal
+	std::lock_guard<std::mutex> lock(playersMutex);
 	for (auto& pair: otherPlayers)
 	{
 		pair.second.status = "stale";
 	}
 
-	// Parse player data
-	size_t startPos = 0;
-	size_t endPos = 0;
-
-	while ((endPos = stateData.find(';', startPos)) != std::string::npos)
+	// Update player data
+	for (const auto& playerInfo: packet.players)
 	{
-		std::string playerData = stateData.substr(startPos, endPos - startPos);
-		startPos = endPos + 1;
+		// Skip self
+		if (playerInfo.id == myPlayerId)
+			continue;
 
-		try
+		// Update or add player
+		auto it = otherPlayers.find(playerInfo.id);
+		if (it != otherPlayers.end())
 		{
-			// Parse player data
-			size_t commaPos = 0;
-			size_t prevCommaPos = 0;
-
-			// Get player ID
-			commaPos = playerData.find(',');
-			if (commaPos == std::string::npos)
-				continue;
-			uint32_t id = std::stoi(playerData.substr(prevCommaPos, commaPos - prevCommaPos));
-			prevCommaPos = commaPos + 1;
-
-			// Skip self
-			if (id == myPlayerId)
-				continue;
-
-			// Get player name
-			commaPos = playerData.find(',', prevCommaPos);
-			if (commaPos == std::string::npos)
-				continue;
-			std::string name = playerData.substr(prevCommaPos, commaPos - prevCommaPos);
-			prevCommaPos = commaPos + 1;
-
-			// Get X position
-			commaPos = playerData.find(',', prevCommaPos);
-			if (commaPos == std::string::npos)
-				continue;
-			float x = std::stof(playerData.substr(prevCommaPos, commaPos - prevCommaPos));
-			prevCommaPos = commaPos + 1;
-
-			// Get Y position
-			commaPos = playerData.find(',', prevCommaPos);
-			if (commaPos == std::string::npos)
-				continue;
-			float y = std::stof(playerData.substr(prevCommaPos, commaPos - prevCommaPos));
-			prevCommaPos = commaPos + 1;
-
-			// Get Z position
-			float z = std::stof(playerData.substr(prevCommaPos));
-
-			// Update or add player
-			auto it = otherPlayers.find(id);
-			if (it != otherPlayers.end())
-			{
-				// Existing player, update info
-				it->second.position.x = x;
-				it->second.position.y = y;
-				it->second.position.z = z;
-				it->second.lastSeen = time(0);
-				it->second.status = "active";
-			}
-			else
-			{
-				// New player
-				PlayerInfo newPlayer;
-				newPlayer.id = id;
-				newPlayer.name = name;
-				newPlayer.position.x = x;
-				newPlayer.position.y = y;
-				newPlayer.position.z = z;
-				newPlayer.lastSeen = time(0);
-				newPlayer.status = "active";
-
-				otherPlayers[id] = newPlayer;
-			}
+			// Existing player, update info
+			it->second.position.x = playerInfo.position.x;
+			it->second.position.y = playerInfo.position.y;
+			it->second.position.z = playerInfo.position.z;
+			it->second.name = playerInfo.name;
+			it->second.lastSeen = time(0);
+			it->second.status = "active";
 		}
-		catch (const std::exception& e)
+		else
 		{
-			logger.error("Error parsing player data: " + std::string(e.what()) + ", Data: " + playerData);
+			// New player
+			PlayerInfo newPlayer;
+			newPlayer.id = playerInfo.id;
+			newPlayer.name = playerInfo.name;
+			newPlayer.position.x = playerInfo.position.x;
+			newPlayer.position.y = playerInfo.position.y;
+			newPlayer.position.z = playerInfo.position.z;
+			newPlayer.lastSeen = time(0);
+			newPlayer.status = "active";
+
+			otherPlayers[playerInfo.id] = newPlayer;
 		}
 	}
 
@@ -470,6 +473,21 @@ void GameClient::parseWorldState(const std::string& stateData)
 			++it;
 		}
 	}
+}
+
+// Helper function to split strings (similar to the one in server)
+std::vector<std::string> GameClient::splitString(const std::string& str, char delimiter)
+{
+	std::vector<std::string> tokens;
+	std::stringstream ss(str);
+	std::string token;
+
+	while (std::getline(ss, token, delimiter))
+	{
+		tokens.push_back(token);
+	}
+
+	return tokens;
 }
 
 // Add a chat message
@@ -497,7 +515,7 @@ void GameClient::clearChatMessages()
 	chatMessages.clear();
 }
 
-// Updated to synchronous connection
+// Updated to use the new packet system for connection
 void GameClient::startConnection()
 {
 	connectionProgress = 0.0f;
@@ -540,50 +558,35 @@ void GameClient::startConnection()
 		        // Update connection progress
 		        threadManager->scheduleUITask([this]() { connectionProgress = 0.5f; });
 
-		        // Start authentication
-		        bool authStarted = authManager->authenticate(
-		                myPlayerName,
-		                myPassword,
-		                rememberCredentials,
-		                // Success callback
-		                [this](uint32_t playerId)
-		                {
-			                threadManager->scheduleUITask(
-			                        [this, playerId]()
-			                        {
-				                        this->myPlayerId = playerId;
-				                        connectionState = ConnectionState::Connected;
+		        // Create authentication packet
+		        auto authPacket = networkManager->GetPacketManager()->createAuthRequest(myPlayerName, myPassword);
 
-				                        // Send a request to get player position
-				                        std::string request = "POSITION:";
-				                        networkManager->sendPacket(request);
-			                        });
-		                },
-		                // Failure callback
-		                [this](const std::string& errorMsg)
-		                {
-			                threadManager->scheduleUITask(
-			                        [this, errorMsg]()
-			                        {
-				                        loginErrorMessage = "Authentication failed: " + errorMsg;
-				                        connectionState = ConnectionState::LoginScreen;
-			                        });
-			                networkManager->disconnect(true);
-		                });
+		        // Get server peer from NetworkManager
+		        ENetPeer* serverPeer = networkManager->getServerPeer();
 
-		        if (!authStarted)
+		        if (serverPeer)
 		        {
-			        networkManager->disconnect(true);
+			        // Send auth packet
+			        networkManager->GetPacketManager()->sendPacket(serverPeer, *authPacket, true);
+
+			        // Update UI state
 			        threadManager->scheduleUITask(
 			                [this]()
 			                {
-				                loginErrorMessage = "Failed to start authentication";
-				                connectionState = ConnectionState::LoginScreen;
+				                connectionState = ConnectionState::Authenticating;
+				                connectionProgress = 0.7f;
 			                });
 		        }
 		        else
 		        {
-			        threadManager->scheduleUITask([this]() { connectionState = ConnectionState::Authenticating; });
+			        // Failed to get server peer
+			        threadManager->scheduleUITask(
+			                [this]()
+			                {
+				                loginErrorMessage = "Failed to authenticate: Internal error";
+				                connectionState = ConnectionState::LoginScreen;
+			                });
+			        networkManager->disconnect(true);
 		        }
 	        });
 
@@ -611,7 +614,35 @@ void GameClient::updateNetwork()
 		        time_t currentTime = time(0);
 		        if (currentTime - lastPositionUpdateTime >= positionUpdateRateMs && authManager->isAuthenticated())
 		        {
-			        networkManager->sendPositionUpdate(myPosition.x, myPosition.y, myPosition.z, lastSentPosition.x, lastSentPosition.y, lastSentPosition.z, useCompressedUpdates, movementThreshold);
+			        // Create position update packet
+			        if (useCompressedUpdates)
+			        {
+				        // Use delta position update if appropriate
+				        if (std::abs(myPosition.x - lastSentPosition.x) > movementThreshold || std::abs(myPosition.y - lastSentPosition.y) > movementThreshold || std::abs(myPosition.z - lastSentPosition.z) > movementThreshold)
+				        {
+					        // Get server peer
+					        ENetPeer* serverPeer = networkManager->getServerPeer();
+
+					        if (serverPeer)
+					        {
+						        auto deltaPacket = networkManager->GetPacketManager()->createDeltaPositionUpdate(myPosition);
+						        networkManager->GetPacketManager()->sendPacket(serverPeer, *deltaPacket, false);
+					        }
+				        }
+			        }
+			        else
+			        {
+				        // Use full position update
+				        ENetPeer* serverPeer = nullptr;
+				        // TODO: Add method to get server peer
+
+				        if (serverPeer)
+				        {
+					        auto posPacket = networkManager->GetPacketManager()->createPositionUpdate(myPlayerId, myPosition);
+					        networkManager->GetPacketManager()->sendPacket(serverPeer, *posPacket, false);
+				        }
+			        }
+
 			        lastSentPosition = myPosition;
 			        lastPositionUpdateTime = currentTime;
 		        }
@@ -721,22 +752,35 @@ void GameClient::initiateRegistration()
 			        return;
 		        }
 
-		        // Send registration request
-		        std::string registerPacket = "COMMAND:register " + username + " " + password;
-		        networkManager->sendPacket(registerPacket);
+		        // Create registration packet
+		        auto regPacket = networkManager->GetPacketManager()->createRegistration(username, password);
 
-		        // Update UI state
-		        threadManager->scheduleUITask(
-		                [this, username, password]()
-		                {
-			                // Set state to wait for registration response
-			                connectionState = ConnectionState::Authenticating;
-			                myPlayerName = username;
+		        // Get server peer
+		        ENetPeer* serverPeer = networkManager->getServerPeer();
 
-			                // Copy credentials to login screen for convenience
-			                strncpy_s(loginUsernameBuffer, username.c_str(), sizeof(loginUsernameBuffer) - 1);
-			                strncpy_s(loginPasswordBuffer, password.c_str(), sizeof(loginPasswordBuffer) - 1);
-		                });
+		        if (serverPeer)
+		        {
+			        // Send registration packet
+			        networkManager->GetPacketManager()->sendPacket(serverPeer, *regPacket, true);
+
+			        // Update UI state
+			        threadManager->scheduleUITask(
+			                [this, username, password]()
+			                {
+				                // Set state to wait for registration response
+				                connectionState = ConnectionState::Authenticating;
+				                myPlayerName = username;
+
+				                // Copy credentials to login screen for convenience
+				                strncpy_s(loginUsernameBuffer, username.c_str(), sizeof(loginUsernameBuffer) - 1);
+				                strncpy_s(loginPasswordBuffer, password.c_str(), sizeof(loginPasswordBuffer) - 1);
+			                });
+		        }
+		        else
+		        {
+			        threadManager->scheduleUITask([this]() { registerErrorMessage = "Failed to send registration request"; });
+			        networkManager->disconnect(true);
+		        }
 	        });
 }
 

@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "NetworkManager.h"
+#include "PacketTypes.h"
 
 AuthManager::AuthManager(Logger& logger, std::shared_ptr<NetworkManager> networkManager, std::shared_ptr<ThreadManager> threadManager)
       : logger(logger), networkManager(networkManager), threadManager(threadManager)
@@ -58,9 +59,23 @@ bool AuthManager::authenticate(const std::string& username, const std::string& p
 
 	logger.debug("Authenticating as user: " + username);
 
-	// Send authentication message - this should be non-blocking
-	std::string authMsg = "AUTH:" + username + "," + password;
-	networkManager->sendPacket(authMsg, true);
+	// Create and send authentication packet - this should be non-blocking
+	auto authPacket = networkManager->GetPacketManager()->createAuthRequest(username, password);
+
+	// Get server peer for sending
+	ENetPeer* serverPeer = networkManager->getServerPeer();
+	if (!serverPeer)
+	{
+		logger.error("Failed to get server peer for authentication");
+		if (authFailedCallback)
+		{
+			threadManager->scheduleTask([failedCallback = authFailedCallback]() { failedCallback("Connection to server lost"); });
+		}
+		return false;
+	}
+
+	// Send the authentication packet with reliability
+	networkManager->GetPacketManager()->sendPacket(serverPeer, *authPacket, true);
 
 	// Save credentials if requested
 	if (rememberCredentials)
@@ -81,60 +96,69 @@ void AuthManager::processAuthResponse(const void* packetData, size_t packetLengt
 	auto successCallback = authSuccessCallback ? authSuccessCallback : this->authSuccessCallback;
 	auto failedCallback = authFailedCallback ? authFailedCallback : this->authFailedCallback;
 
-	std::string message(reinterpret_cast<const char*>(packetData), packetLength);
+	// Create a span from the raw packet data
+	std::span<const uint8_t> data(static_cast<const uint8_t*>(packetData), packetLength);
 
-	// Check if this is an authentication response
-	size_t commaPos = message.find(',', 13);
-	if (commaPos != std::string::npos)
+	// Check if there's enough data for a header
+	if (data.size() < sizeof(GameProtocol::PacketHeader))
 	{
-		std::string result = message.substr(14, commaPos - 14);
-
-		if (result == "success")
+		logger.error("Auth response packet too small");
+		if (failedCallback)
 		{
-			try
-			{
-				playerId = std::stoi(message.substr(commaPos + 1));
-				authenticated = true;
-
-				logger.info("Authentication successful! Player ID: " + std::to_string(playerId));
-
-				if (successCallback)
-				{
-					// Use thread manager
-					threadManager->scheduleTask([successCallback, pid = playerId]() { successCallback(pid); });
-				}
-			}
-			catch (const std::exception& e)
-			{
-				logger.error("Failed to parse player ID: " + std::string(e.what()));
-				if (failedCallback)
-				{
-					// Use thread manager
-					threadManager->scheduleTask([failedCallback, errorMsg = std::string("Server sent invalid player ID")]() { failedCallback(errorMsg); });
-				}
-			}
+			threadManager->scheduleTask([failedCallback]() { failedCallback("Received malformed authentication response"); });
 		}
-		else
-		{
-			authenticated = false;
-			std::string errorMessage = message.substr(commaPos + 1);
-			logger.error("Authentication failed: " + errorMessage);
+		return;
+	}
 
-			if (failedCallback)
-			{
-				// Use thread manager
-				threadManager->scheduleTask([failedCallback, errorMsg = errorMessage]() { failedCallback(errorMsg); });
-			}
+	// Try to deserialize as an AuthResponsePacket
+	auto packet = GameProtocol::deserializePacket(data);
+
+	if (!packet || packet->getType() != GameProtocol::PacketType::AuthResponse)
+	{
+		logger.error("Failed to deserialize auth response packet");
+		if (failedCallback)
+		{
+			threadManager->scheduleTask([failedCallback]() { failedCallback("Received malformed authentication response"); });
+		}
+		return;
+	}
+
+	// Cast to the specific packet type
+	auto* authResponse = dynamic_cast<GameProtocol::AuthResponsePacket*>(packet.get());
+	if (!authResponse)
+	{
+		logger.error("Failed to cast auth response packet");
+		if (failedCallback)
+		{
+			threadManager->scheduleTask([failedCallback]() { failedCallback("Received malformed authentication response"); });
+		}
+		return;
+	}
+
+	// Process the authentication response
+	if (authResponse->success)
+	{
+		playerId = authResponse->playerId;
+		authenticated = true;
+
+		logger.info("Authentication successful! Player ID: " + std::to_string(playerId));
+
+		if (successCallback)
+		{
+			// Use thread manager
+			threadManager->scheduleTask([successCallback, pid = playerId]() { successCallback(pid); });
 		}
 	}
 	else
 	{
-		// Malformed auth response
-		logger.error("Received malformed authentication response");
+		authenticated = false;
+		std::string errorMessage = authResponse->message;
+		logger.error("Authentication failed: " + errorMessage);
+
 		if (failedCallback)
 		{
 			// Use thread manager
-			threadManager->scheduleTask([failedCallback]() { failedCallback("Received malformed authentication response"); });
+			threadManager->scheduleTask([failedCallback, errorMsg = errorMessage]() { failedCallback(errorMsg); });
 		}
 	}
 }

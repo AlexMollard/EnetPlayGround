@@ -91,6 +91,9 @@
     <ClCompile Include="src\ThemeManager.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\..\EnetShared\PacketHeader.h" />
+    <ClInclude Include="..\..\EnetShared\PacketManager.h" />
+    <ClInclude Include="..\..\EnetShared\PacketTypes.h" />
     <ClInclude Include="..\..\EnetShared\StackTrace.h" />
     <ClInclude Include="..\..\EnetShared\Logger.h" />
     <ClInclude Include="..\..\EnetShared\ThreadPool\thread_pool.h" />

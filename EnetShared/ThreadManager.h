@@ -150,11 +150,14 @@ public:
      * @param func The function to execute
      * @param args The arguments to pass to the function
      */
-	template<typename Func, typename... Args>
-	void scheduleResourceTask(const std::vector<ResourceId>& resources, Func&& func, Args&&... args)
+	template<typename Func>
+	void scheduleResourceTask(const std::vector<ResourceId>& resources, Func&& func)
 	{
 		// Create a task wrapper that will handle resource locking
-		auto taskWrapper = [this, resources, func = std::forward<Func>(func), args = std::make_tuple(std::forward<Args>(args)...)]() mutable
+		// Note: use std::function with a shared_ptr to wrap the callable
+		auto sharedFunc = std::make_shared<std::decay_t<Func>>(std::forward<Func>(func));
+
+		auto taskWrapper = [this, resources, funcPtr = std::move(sharedFunc)]() mutable
 		{
 			// Collect mutex pointers first
 			std::vector<std::shared_ptr<std::shared_mutex>> mutexPtrs;
@@ -214,17 +217,28 @@ public:
 			ExclusiveLockCleanup cleanup(mutexPtrs);
 
 			// Execute the task with acquired locks
-			return std::apply(func, args);
+			(*funcPtr)();
 			// Locks released automatically when cleanup goes out of scope
 		};
 
 		// Submit the wrapped task to the pool
-		pool.enqueue_detach(taskWrapper);
+		pool.enqueue_detach(std::move(taskWrapper));
 
 		// Update stats
 		std::lock_guard<std::mutex> lock(statsMutex);
 		tasksSubmitted++;
 		resourceTasksSubmitted++;
+	}
+
+	// Overload that also takes additional arguments
+	template<typename Func, typename... Args>
+	void scheduleResourceTask(const std::vector<ResourceId>& resources, Func&& func, Args&&... args)
+	{
+		// Create a lambda that captures the function and arguments
+		auto task = [func = std::forward<Func>(func), argsTuple = std::make_tuple(std::forward<Args>(args)...)]() mutable { return std::apply(func, argsTuple); };
+
+		// Use the other overload
+		scheduleResourceTask(resources, std::move(task));
 	}
 
 	/**

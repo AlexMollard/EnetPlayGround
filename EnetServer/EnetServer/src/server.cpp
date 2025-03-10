@@ -12,7 +12,7 @@
 
 // Constructor
 GameServer::GameServer()
-      : dbManager(logger), threadManager()
+      : dbManager(logger), threadManager(), packetManager(logger)
 {
 	// Set up logger
 	logger.info("Initializing server...");
@@ -771,8 +771,21 @@ void GameServer::handleClientMessage(const ENetEvent& event)
 	stats.totalPacketsReceived++;
 	stats.totalBytesReceived += event.packet->dataLength;
 
-	// Parse message outside resource locks for efficiency
-	std::string message(reinterpret_cast<char*>(event.packet->data), event.packet->dataLength);
+	// Parse the packet using our new packet system
+	auto packet = packetManager.receivePacket(event.packet);
+	if (!packet)
+	{
+		// Invalid packet, log with more details for debugging
+		logger.error("Received invalid packet - size: " + std::to_string(event.packet->dataLength));
+
+		// If it's large enough to potentially have a header, try to extract more info
+		if (event.packet->dataLength >= sizeof(GameProtocol::PacketHeader))
+		{
+			const auto* header = reinterpret_cast<const GameProtocol::PacketHeader*>(event.packet->data);
+			logger.error("  Magic: 0x" + std::to_string(header->magic) + ", Version: " + std::to_string(header->version) + ", Type: " + std::to_string(static_cast<int>(header->type)));
+		}
+		return;
+	}
 
 	// Now handle the message with the appropriate resource access
 	threadManager.scheduleResourceTask(
@@ -782,7 +795,7 @@ void GameServer::handleClientMessage(const ENetEvent& event)
 	                GameResources::PeerStatsId, // For updating statistics
 	                GameResources::PluginsId    // For plugin event dispatch
 	        },
-	        [this, event, message]()
+	        [this, event, packetPtr = std::move(packet)]() mutable
 	        {
 		        // Get player ID from peer data
 		        uint32_t* ptrPlayerId = reinterpret_cast<uint32_t*>(event.peer->data);
@@ -794,7 +807,7 @@ void GameServer::handleClientMessage(const ENetEvent& event)
 
 		        uint32_t playerId = *ptrPlayerId;
 
-		        // Find player - all in one lookup without separate mutex locks
+		        // Find player
 		        Player* player = nullptr;
 
 		        if (playerId == 0)
@@ -825,89 +838,148 @@ void GameServer::handleClientMessage(const ENetEvent& event)
 		        player->lastUpdateTime = Utils::getCurrentTimeMs();
 		        player->totalBytesReceived += event.packet->dataLength;
 
-		        // Log the message
-		        logger.logNetworkEvent("Message from " + player->name + ": " + message);
+		        // Log the message type
+		        logger.logNetworkEvent("Message from " + player->name + ": Packet Type " + std::to_string(static_cast<int>(packetPtr->getType())));
 
-		        // Send plugin event
-		        pluginManager->dispatchPlayerMessage(*player, message);
+		        // Send plugin event (you might need to adapt this for binary packets)
+		        // For now, we'll skip this or implement a string-based representation
 
-		        // Handle different message types - each with appropriate task scheduling
-		        if (message.substr(0, 5) == "AUTH:")
-		        {
-			        // Release current resource locks before handling auth
-			        // Schedule a new task for auth handling
-			        threadManager.scheduleTask([this, message, eventPeer = event.peer]() { handleAuthMessage(message.substr(5), eventPeer); });
-		        }
-		        else if (message.substr(0, 11) == "MOVE_DELTA:" && player->isAuthenticated)
-		        {
-			        // For move operations, we need SpatialGrid access too
-			        // Schedule a separate task with the right resources
-			        threadManager.scheduleResourceTask({ GameResources::PlayersId, GameResources::SpatialGridId }, [this, playerId = player->id, message]() { handleDeltaPositionUpdate(playerId, message.substr(11)); });
-		        }
-		        else if (message.substr(0, 9) == "POSITION:" && player->isAuthenticated)
-		        {
-			        // Position updates need SpatialGrid too
-			        threadManager.scheduleResourceTask({ GameResources::PlayersId, GameResources::SpatialGridId }, [this, playerId = player->id]() { handleSendPosition(playerId); });
-		        }
-		        else if (message.substr(0, 5) == "CHAT:" && player->isAuthenticated)
-		        {
-			        // Chat needs Chat resource
-			        threadManager.scheduleResourceTask({ GameResources::ChatId, GameResources::PlayersId }, [this, playerCopy = *player, message]() { handleChatMessage(playerCopy, message.substr(5)); });
-		        }
-		        else if (message.substr(0, 5) == "PING:")
-		        {
-			        // Ping is simple, just needs player resources
-			        threadManager.scheduleResourceTask({ GameResources::PlayersId }, [this, playerCopy = *player, message]() { handlePingMessage(playerCopy, message.substr(5)); });
-		        }
-		        else if (message.substr(0, 8) == "COMMAND:" && player->isAuthenticated)
-		        {
-			        // Commands need various resources depending on the command
-			        // For simplicity, we'll use this basic set of resources
-			        threadManager.scheduleResourceTask({ GameResources::PlayersId, GameResources::AuthId, GameResources::ChatId }, [this, playerCopy = *player, message]() { handleCommandMessage(playerCopy, message.substr(8)); });
-		        }
-		        else if (!player->isAuthenticated && message.substr(0, 8) == "COMMAND:")
-		        {
-			        // Special handling for login command from unauthenticated player
-			        std::vector<std::string> parts = Utils::splitString(message, ' ');
-			        if (parts.empty())
-				        return;
-
-			        if (parts[0].substr(0, 13) == "COMMAND:login")
-			        {
-				        if (parts.size() >= 3)
-				        {
-					        std::string username = parts[1];
-					        std::string password = parts[2];
-
-					        // Schedule a new task for auth handling
-					        threadManager.scheduleTask([this, username, password, playerPeer = player->peer]() { handleAuthMessage(username + "," + password, playerPeer); });
-				        }
-				        else
-				        {
-					        sendSystemMessage(*player, "Usage: /login username password");
-				        }
-			        }
-			        else if (parts[0].substr(0, 16) == "COMMAND:register")
-			        {
-				        if (parts.size() >= 3)
-				        {
-					        std::string username = parts[1];
-					        std::string password = parts[2];
-
-					        // Schedule a new task for registration handling
-					        threadManager.scheduleTask([this, username, password, playerCopy = *player]() { handleRegistration(playerCopy, username, password); });
-				        }
-				        else
-				        {
-					        sendSystemMessage(*player, "Usage: /register username password");
-				        }
-			        }
-			        else
-			        {
-				        sendSystemMessage(*player, "You must log in first. Use /login username password");
-			        }
-		        }
+		        // Handle the packet based on its type
+		        handlePacket(*player, std::move(packetPtr));
 	        });
+}
+
+void GameServer::handlePacket(const Player& player, std::unique_ptr<GameProtocol::Packet> packetPtr)
+{
+	auto& packet = *packetPtr;
+
+	// Handle different packet types
+	switch (packet.getType())
+	{
+		case GameProtocol::PacketType::AuthRequest:
+		{
+			// Handle authentication request
+			auto& authPacket = static_cast<GameProtocol::AuthRequestPacket&>(packet);
+
+			// Schedule a new task for auth handling
+			threadManager.scheduleTask([this, username = authPacket.username, password = authPacket.password, playerPeer = player.peer]() { handleAuthMessage(username + "," + password, playerPeer); });
+			break;
+		}
+
+		case GameProtocol::PacketType::Registration:
+		{
+			// Handle registration request
+			auto& regPacket = static_cast<GameProtocol::RegistrationPacket&>(packet);
+
+			// Schedule registration handling
+			threadManager.scheduleTask([this, playerCopy = player, username = regPacket.username, password = regPacket.password]() { handleRegistration(playerCopy, username, password); });
+			break;
+		}
+
+		case GameProtocol::PacketType::DeltaPositionUpdate:
+		{
+			// Handle position update
+			if (!player.isAuthenticated)
+			{
+				logger.error("Unauthenticated player tried to update position");
+				return;
+			}
+
+			auto& posPacket = static_cast<GameProtocol::DeltaPositionUpdatePacket&>(packet);
+			Position newPos = posPacket.position;
+
+			// Schedule position update with the right resources
+			threadManager.scheduleResourceTask({ GameResources::PlayersId, GameResources::SpatialGridId },
+			        [this, playerId = player.id, newPos]()
+			        {
+				        // Convert to a delta format for the existing method
+				        std::string deltaData = "x" + std::to_string(newPos.x) + ",y" + std::to_string(newPos.y) + ",z" + std::to_string(newPos.z);
+
+				        // Call existing position update logic
+				        handleDeltaPositionUpdate(playerId, deltaData);
+			        });
+			break;
+		}
+
+		case GameProtocol::PacketType::ChatMessage:
+		{
+			// Handle chat message
+			if (!player.isAuthenticated)
+			{
+				logger.error("Unauthenticated player tried to send chat message");
+				return;
+			}
+
+			auto& chatPacket = static_cast<GameProtocol::ChatMessagePacket&>(packet);
+
+			// Schedule chat handling with the right resources
+			threadManager.scheduleResourceTask({ GameResources::ChatId, GameResources::PlayersId }, [this, playerCopy = player, message = chatPacket.message]() { handleChatMessage(playerCopy, message); });
+			break;
+		}
+
+		case GameProtocol::PacketType::Command:
+		{
+			// Handle command
+			auto& cmdPacket = static_cast<GameProtocol::CommandPacket&>(packet);
+
+			if (!player.isAuthenticated && cmdPacket.command != "login" && cmdPacket.command != "register")
+			{
+				sendSystemMessage(player, "You must log in first. Use /login username password");
+				return;
+			}
+
+			// Special handling for login/register commands from unauthenticated players
+			if (!player.isAuthenticated)
+			{
+				if (cmdPacket.command == "login")
+				{
+					if (cmdPacket.arguments.size() >= 2)
+					{
+						std::string username = cmdPacket.arguments[0];
+						std::string password = cmdPacket.arguments[1];
+
+						// Schedule auth handling
+						threadManager.scheduleTask([this, username, password, playerPeer = player.peer]() { handleAuthMessage(username + "," + password, playerPeer); });
+					}
+					else
+					{
+						sendSystemMessage(player, "Usage: /login username password");
+					}
+				}
+				else if (cmdPacket.command == "register")
+				{
+					if (cmdPacket.arguments.size() >= 2)
+					{
+						std::string username = cmdPacket.arguments[0];
+						std::string password = cmdPacket.arguments[1];
+
+						// Schedule registration handling
+						threadManager.scheduleTask([this, playerCopy = player, username, password]() { handleRegistration(playerCopy, username, password); });
+					}
+					else
+					{
+						sendSystemMessage(player, "Usage: /register username password");
+					}
+				}
+				return;
+			}
+
+			// For authenticated players, handle the command normally
+			threadManager.scheduleResourceTask({ GameResources::PlayersId, GameResources::AuthId, GameResources::ChatId },
+			        [this, playerCopy = player, cmd = cmdPacket.command, args = cmdPacket.arguments]()
+			        {
+				        // Call existing command handler
+				        handleCommandMessage(playerCopy, cmd + " " + Utils::joinStrings(args, " "));
+			        });
+			break;
+		}
+
+			// Add cases for other packet types
+
+		default:
+			logger.error("Received unknown packet type: " + std::to_string(static_cast<int>(packet.getType())));
+			break;
+	}
 }
 
 // Handle client disconnect
@@ -1133,7 +1205,7 @@ void GameServer::handleAuthMessage(const std::string& authDataStr, ENetPeer* pee
 		        authenticatedPlayer.lastValidPosition = authData.lastPosition;
 		        authenticatedPlayer.peer = peer;
 		        authenticatedPlayer.lastUpdateTime = Utils::getCurrentTimeMs();
-				authenticatedPlayer.connectionStartTime = player.connectionStartTime;
+		        authenticatedPlayer.connectionStartTime = player.connectionStartTime;
 		        authenticatedPlayer.failedAuthAttempts = 0;
 		        authenticatedPlayer.totalBytesReceived = player.totalBytesReceived;
 		        authenticatedPlayer.totalBytesSent = player.totalBytesSent;
@@ -1197,20 +1269,23 @@ void GameServer::handleRegistration(const Player& player, const std::string& use
 	// Validate credentials outside resource locks
 	if (username.length() < 3 || username.length() > 20)
 	{
-		sendSystemMessage(player, "Username must be between 3 and 20 characters");
+		auto packet = PacketManager::createSystemMessage("Username must be between 3 and 20 characters");
+		sendPacket(player.peer, *packet, true);
 		return;
 	}
 
 	if (password.length() < 6)
 	{
-		sendSystemMessage(player, "Password must be at least 6 characters");
+		auto packet = PacketManager::createSystemMessage("Password must be at least 6 characters");
+		sendPacket(player.peer, *packet, true);
 		return;
 	}
 
 	// Check for invalid characters
 	if (username.find(',') != std::string::npos || username.find(' ') != std::string::npos || username.find('\t') != std::string::npos)
 	{
-		sendSystemMessage(player, "Username contains invalid characters");
+		auto packet = PacketManager::createSystemMessage("Username contains invalid characters");
+		sendPacket(player.peer, *packet, true);
 		return;
 	}
 
@@ -1274,7 +1349,7 @@ void GameServer::handleRegistration(const Player& player, const std::string& use
 			        registeredPlayer.peer = player.peer;
 			        registeredPlayer.lastUpdateTime = Utils::getCurrentTimeMs();
 			        registeredPlayer.connectionStartTime = player.connectionStartTime;
-					registeredPlayer.failedAuthAttempts = 0;
+			        registeredPlayer.failedAuthAttempts = 0;
 			        registeredPlayer.totalBytesReceived = player.totalBytesReceived;
 			        registeredPlayer.totalBytesSent = player.totalBytesSent;
 			        registeredPlayer.pingMs = player.pingMs;
@@ -1302,21 +1377,69 @@ void GameServer::handleRegistration(const Player& player, const std::string& use
 			        // Store these for use in subsequent messages
 			        ENetPeer* playerPeer = player.peer;
 
-			        // Send registration response
-			        sendAuthResponse(playerPeer, true, std::to_string(newPlayerId));
+			        // Send registration response with auth response packet
+			        auto authResponsePacket = PacketManager::createAuthResponse(true, "Registration successful", newPlayerId);
+			        sendPacket(playerPeer, *authResponsePacket, true);
 
 			        // Send welcome message - schedule as a separate task
-			        threadManager.scheduleTask([this, newPlayerId, username]() { sendSystemMessage(newPlayerId, "Welcome to the game, " + username + "!"); });
+			        threadManager.scheduleTask(
+			                [this, newPlayerId, username]()
+			                {
+				                // Find the player by ID
+				                threadManager.scheduleResourceTask({ GameResources::PlayersId },
+				                        [this, newPlayerId, username]()
+				                        {
+					                        auto it = players.find(newPlayerId);
+					                        if (it != players.end())
+					                        {
+						                        auto welcomePacket = PacketManager::createSystemMessage("Welcome to the game, " + username + "!");
+						                        sendPacket(it->second.peer, *welcomePacket, true);
+					                        }
+				                        });
+			                });
 
 			        // Broadcast join message - schedule as a separate task
-			        threadManager.scheduleTask([this, username]() { broadcastSystemMessage(username + " has joined the game for the first time!"); });
+			        threadManager.scheduleTask(
+			                [this, username]()
+			                {
+				                // Create the message packet
+				                auto joinPacket = PacketManager::createSystemMessage(username + " has joined the game for the first time!");
+
+				                // Schedule a resource task to get all players
+				                threadManager.scheduleResourceTask({ GameResources::PlayersId },
+				                        [this, packet = std::move(joinPacket)]()
+				                        {
+					                        // Collect all authenticated players' peers
+					                        std::vector<ENetPeer*> authenticatedPeers;
+
+					                        for (auto& pair: players)
+					                        {
+						                        if (pair.second.isAuthenticated && pair.second.peer != nullptr)
+						                        {
+							                        authenticatedPeers.push_back(pair.second.peer);
+						                        }
+					                        }
+
+					                        // Release resources before sending packets
+					                        threadManager.scheduleTask(
+					                                [this, authenticatedPeers, packet = std::move(packet)]()
+					                                {
+						                                for (ENetPeer* peer: authenticatedPeers)
+						                                {
+							                                sendPacket(peer, *packet, true);
+						                                }
+					                                });
+				                        });
+			                });
 
 			        // Remove old player entry
 			        players.erase(oldKey);
 		        }
 		        else
 		        {
-			        sendSystemMessage(player, "Registration failed: " + response);
+			        // Send error message for failed registration
+			        auto errorPacket = PacketManager::createSystemMessage("Registration failed: " + response);
+			        sendPacket(player.peer, *errorPacket, true);
 		        }
 	        });
 }
@@ -1492,19 +1615,16 @@ void GameServer::handleSendPosition(uint32_t playerId)
 			        // Get current time
 			        uint32_t currentTime = Utils::getCurrentTimeMs();
 
-			        // Create position string in the format "x12.34,y56.78,z90.12"
-			        std::string positionString = "x" + std::to_string(player.position.x) + "," + "y" + std::to_string(player.position.y) + "," + "z" + std::to_string(player.position.z);
+			        // Create a position update packet
+			        auto positionPacket = PacketManager::createPositionUpdate(playerId, player.position);
 
-			        // Create a position update packet using the existing sendPacket method
-			        std::string positionPacket = "POSITION:" + positionString;
-
-			        // Send the position data to the client
-			        sendPacket(player.peer, positionPacket, false); // Using unreliable packets for position updates
+			        // Send the position data to the client (using unreliable transmission for position updates)
+			        sendPacket(player.peer, *positionPacket, false);
 
 			        // Log the position update (optional)
-			        logger.debug("Sent position update to " + player.name + ": " + positionString);
+			        logger.debug("Sent position update to " + player.name + ": (" + std::to_string(player.position.x) + ", " + std::to_string(player.position.y) + ", " + std::to_string(player.position.z) + ")");
 
-			        // Update timestamp of when we last sent position - now works because we have a non-const reference
+			        // Update timestamp of when we last sent position
 			        player.lastPositionUpdateTime = currentTime;
 
 			        // Send the player's position to nearby players
@@ -1528,12 +1648,15 @@ void GameServer::handleSendPosition(uint32_t playerId)
 			        // Schedule packet sending as a separate task to avoid holding resources
 			        if (!nearbyPeers.empty())
 			        {
+				        // Need to move the packet to the lambda
 				        threadManager.scheduleTask(
-				                [this, nearbyPeers, positionPacket]()
+				                [this, nearbyPeers, packet = std::move(positionPacket)]()
 				                {
 					                for (ENetPeer* peer: nearbyPeers)
 					                {
-						                sendPacket(peer, positionPacket, false);
+						                // Send the position update to each nearby player
+						                // We reuse the same packet for all peers
+						                sendPacket(peer, *packet, false);
 					                }
 				                });
 			        }
@@ -1544,7 +1667,6 @@ void GameServer::handleSendPosition(uint32_t playerId)
 		        }
 	        });
 }
-
 
 // Handle chat message
 void GameServer::handleChatMessage(const Player& player, const std::string& message)
@@ -1588,7 +1710,38 @@ void GameServer::handleChatMessage(const Player& player, const std::string& mess
 	        });
 
 	// Broadcast to all players - schedule separately to avoid holding Chat resource
-	threadManager.scheduleTask([this, playerName = player.name, message]() { broadcastChatMessage(playerName, message); });
+	threadManager.scheduleTask(
+	        [this, playerName = player.name, message]()
+	        {
+		        // Create a properly structured chat message packet
+		        auto chatPacket = PacketManager::createChatMessage(playerName, message, true); // true = global message
+
+		        // Schedule a resource task to get all players
+		        threadManager.scheduleResourceTask({ GameResources::PlayersId },
+		                [this, packet = std::move(chatPacket)]()
+		                {
+			                // Collect all authenticated players' peers
+			                std::vector<ENetPeer*> authenticatedPeers;
+
+			                for (auto& pair: players)
+			                {
+				                if (pair.second.isAuthenticated && pair.second.peer != nullptr)
+				                {
+					                authenticatedPeers.push_back(pair.second.peer);
+				                }
+			                }
+
+			                // Release resources before sending packets
+			                threadManager.scheduleTask(
+			                        [this, authenticatedPeers, packet = std::move(packet)]()
+			                        {
+				                        for (ENetPeer* peer: authenticatedPeers)
+				                        {
+					                        sendPacket(peer, *packet, true); // Use reliable transmission for chat
+				                        }
+			                        });
+		                });
+	        });
 }
 
 // Handle ping message
@@ -1598,9 +1751,15 @@ void GameServer::handlePingMessage(const Player& player, const std::string& ping
 	{
 		uint32_t clientTime = std::stoul(pingData);
 
-		// Send pong response
-		std::string pongMsg = "PONG:" + pingData;
-		sendPacket(player.peer, pongMsg, false);
+		// Create and send a Heartbeat packet with the clientTime
+		// TODO: we should have a dedicated PingResponse/Pong packet
+		// For now, we'll use a Heartbeat packet which should be defined in your PacketTypes.h
+
+		// Create a heartbeat packet (using the existing packet type)
+		auto heartbeatPacket = std::make_unique<GameProtocol::HeartbeatPacket>(clientTime);
+
+		// Send the response
+		sendPacket(player.peer, *heartbeatPacket, false); // Unreliable is fine for pings
 	}
 	catch (const std::exception& e)
 	{
@@ -1636,72 +1795,91 @@ void GameServer::handleCommandMessage(const Player& player, const std::string& c
 	}
 	else if (!commandHandled)
 	{
-		sendSystemMessage(player, "Unknown command: " + command);
+		// Create and send a system message packet for the unknown command
+		auto packet = PacketManager::createSystemMessage("Unknown command: " + command);
+		sendPacket(player.peer, *packet, true);
 	}
-}
-
-// Send auth response
-void GameServer::sendAuthResponse(ENetPeer* peer, bool success, const std::string& message)
-{
-	std::string response = "AUTH_RESPONSE:" + std::string(success ? "success" : "failure") + "," + message;
-	sendPacket(peer, response, true);
 }
 
 // Send packet to player
-void GameServer::sendPacket(ENetPeer* peer, const std::string& message, bool reliable)
+void GameServer::sendPacket(ENetPeer* peer, const GameProtocol::Packet& packet, bool reliable)
 {
-	if (peer == nullptr)
+	if (!peer)
 		return;
 
-	// Create and send packet
-	ENetPacket* packet = enet_packet_create(message.c_str(), message.length(), reliable ? ENET_PACKET_FLAG_RELIABLE : 0);
-
-	if (enet_peer_send(peer, 0, packet) < 0)
-	{
-		logger.warning("Failed to send packet: " + message);
-		enet_packet_destroy(packet);
-		return;
-	}
-
-	// Update global stats - atomic operation
-	stats.totalPacketsSent++;
-	stats.totalBytesSent += message.length();
-
-	// Update per-peer stats - needs resource access
-	threadManager.scheduleResourceTask({ GameResources::PeerStatsId }, [this, peer, messageLength = message.length()]() { peerStats[reinterpret_cast<uintptr_t>(peer)].totalBytesSent += messageLength; });
-}
-
-// Send system message to player
-void GameServer::sendSystemMessage(const Player& player, const std::string& message)
-{
-	logger.trace("Sending system message to " + player.name + ": " + message);
-	std::string sysMsg = "SYSTEM:" + message;
-	sendPacket(player.peer, sysMsg, true);
-}
-
-// Send system message to player by ID
-void GameServer::sendSystemMessage(uint32_t playerId, const std::string& message)
-{
-	threadManager.scheduleReadTask({ GameResources::PlayersId },
-	        [this, playerId, message]()
+	// Use the packet manager to send the packet
+	packetManager.sendPacket(peer,
+	        packet,
+	        reliable,
+	        [this, peer](size_t dataSize)
 	        {
-		        auto it = players.find(playerId);
-		        if (it != players.end())
-		        {
-			        // Use a const reference since we're only reading
-			        const Player& player = it->second;
+		        // Update global stats - atomic operation
+		        stats.totalPacketsSent++;
+		        stats.totalBytesSent += dataSize;
 
-			        // Schedule the actual send in a separate task to avoid holding resources
-			        threadManager.scheduleTask([this, playerCopy = player, message]() { sendSystemMessage(playerCopy, message); });
-		        }
+		        // Update per-peer stats - needs resource access
+		        threadManager.scheduleResourceTask({ GameResources::PeerStatsId }, [this, peer, dataSize]() { peerStats[reinterpret_cast<uintptr_t>(peer)].totalBytesSent += dataSize; });
 	        });
 }
 
-// Send teleport command to player
+// Updated system message method
+void GameServer::sendSystemMessage(const Player& player, const std::string& message)
+{
+	logger.trace("Sending system message to " + player.name + ": " + message);
+
+	// Create and send system message packet
+	auto packet = PacketManager::createSystemMessage(message);
+	sendPacket(player.peer, *packet, true); // System messages should be reliable
+}
+
+// Updated auth response method
+void GameServer::sendAuthResponse(ENetPeer* peer, bool success, const std::string& message, uint32_t playerId)
+{
+	// Create and send auth response packet
+	auto packet = PacketManager::createAuthResponse(success, message, playerId);
+	sendPacket(peer, *packet, true); // Auth responses should be reliable
+}
+
+// Updated teleport method
 void GameServer::sendTeleport(const Player& player, const Position& position)
 {
-	std::string teleportMsg = "TELEPORT:" + std::to_string(position.x) + "," + std::to_string(position.y) + "," + std::to_string(position.z);
-	sendPacket(player.peer, teleportMsg, true);
+	// Create and send teleport packet
+	auto packet = PacketManager::createTeleport(position);
+	sendPacket(player.peer, *packet, true); // Teleports should be reliable
+}
+
+// Updated broadcast chat message method
+void GameServer::broadcastChatMessage(const std::string& sender, const std::string& message)
+{
+	// Create chat message packet
+	auto packet = PacketManager::createChatMessage(sender, message);
+
+	// Schedule a resource task that requires Players resource
+	threadManager.scheduleResourceTask({ GameResources::PlayersId },
+	        [this, packet = std::move(packet)]()
+	        {
+		        // Collect all authenticated players' peers
+		        std::vector<ENetPeer*> authenticatedPeers;
+
+		        for (auto& pair: players)
+		        {
+			        if (pair.second.isAuthenticated && pair.second.peer != nullptr)
+			        {
+				        authenticatedPeers.push_back(pair.second.peer);
+			        }
+		        }
+
+		        // Release resources before sending packets
+		        // Schedule a separate task for sending packets to avoid holding resources
+		        threadManager.scheduleTask(
+		                [this, authenticatedPeers, packet = std::move(packet)]()
+		                {
+			                for (ENetPeer* peer: authenticatedPeers)
+			                {
+				                sendPacket(peer, *packet, true);
+			                }
+		                });
+	        });
 }
 
 // Broadcast world state to all players
@@ -1719,8 +1897,8 @@ void GameServer::broadcastWorldState()
 			        if (!player.isAuthenticated)
 				        continue;
 
-			        // Prepare world state packet for this player
-			        std::string worldState = "WORLD_STATE:";
+			        // Create world state packet for this player
+			        auto worldStatePacket = PacketManager::createWorldState();
 
 			        // Get nearby entities
 			        std::set<uint32_t> visibleEntities;
@@ -1751,7 +1929,13 @@ void GameServer::broadcastWorldState()
 				        if (it != players.end() && it->second.isAuthenticated)
 				        {
 					        const Player& otherPlayer = it->second;
-					        worldState += std::to_string(otherPlayer.id) + "," + otherPlayer.name + "," + std::to_string(otherPlayer.position.x) + "," + std::to_string(otherPlayer.position.y) + "," + std::to_string(otherPlayer.position.z) + ";";
+
+					        // Add player to world state packet
+					        GameProtocol::WorldStatePacket::PlayerInfo info;
+					        info.id = otherPlayer.id;
+					        info.name = otherPlayer.name;
+					        info.position = otherPlayer.position;
+					        worldStatePacket->players.push_back(info);
 				        }
 			        }
 
@@ -1763,7 +1947,7 @@ void GameServer::broadcastWorldState()
 
 			        // Send world state (use unreliable packet for frequent updates)
 			        // Do this in a separate task to avoid holding resources during network operations
-			        threadManager.scheduleTask([this, playerPeer, worldState]() { sendPacket(playerPeer, worldState, false); });
+			        threadManager.scheduleTask([this, playerPeer, packet = std::move(worldStatePacket)]() { sendPacket(playerPeer, *packet, false); });
 		        }
 	        });
 }
@@ -1876,43 +2060,6 @@ std::vector<std::string> GameServer::getOnlinePlayerNames()
 		                return names;
 	                })
 	        .get(); // Wait for the result
-}
-
-// Broadcast chat message to all players
-void GameServer::broadcastChatMessage(const std::string& sender, const std::string& message)
-{
-	// Create the chat message outside the resource task (no resources needed)
-	std::string chatMsg = "CHAT:" + sender + ":" + message;
-
-	// Schedule a resource task that requires Players and Plugins resources
-	threadManager.scheduleResourceTask({ GameResources::PlayersId, GameResources::PluginsId },
-	        [this, sender, message, chatMsg]()
-	        {
-		        // Dispatch chat message to plugins
-		        pluginManager->dispatchChatMessage(sender, message);
-
-		        // Collect all authenticated players' peers
-		        std::vector<ENetPeer*> authenticatedPeers;
-
-		        for (auto& pair: players)
-		        {
-			        if (pair.second.isAuthenticated && pair.second.peer != nullptr)
-			        {
-				        authenticatedPeers.push_back(pair.second.peer);
-			        }
-		        }
-
-		        // Release resources before sending packets
-		        // Schedule a separate task for sending packets to avoid holding resources
-		        threadManager.scheduleTask(
-		                [this, authenticatedPeers, chatMsg]()
-		                {
-			                for (ENetPeer* peer: authenticatedPeers)
-			                {
-				                sendPacket(peer, chatMsg, true);
-			                }
-		                });
-	        });
 }
 
 // Updated function signature
@@ -2466,7 +2613,9 @@ void GameServer::initializeCommandHandlers()
 			               "/tpplayer username - Teleport to player";
 		}
 
-		sendSystemMessage(player, helpMessage);
+		// Create and send system message packet
+		auto packet = PacketManager::createSystemMessage(helpMessage);
+		sendPacket(player.peer, *packet, true);
 	};
 
 	// Position command - Read-only
@@ -2474,7 +2623,10 @@ void GameServer::initializeCommandHandlers()
 	{
 		std::stringstream ss;
 		ss << "Current position: X=" << player.position.x << " Y=" << player.position.y << " Z=" << player.position.z;
-		sendSystemMessage(player, ss.str());
+
+		// Create and send system message packet
+		auto packet = PacketManager::createSystemMessage(ss.str());
+		sendPacket(player.peer, *packet, true);
 	};
 
 	// Teleport command - Requires write access to player and spatial grid
@@ -2482,7 +2634,8 @@ void GameServer::initializeCommandHandlers()
 	{
 		if (args.size() < 4)
 		{
-			sendSystemMessage(player, "Usage: /tp x y z");
+			auto packet = PacketManager::createSystemMessage("Usage: /tp x y z");
+			sendPacket(player.peer, *packet, true);
 			return;
 		}
 
@@ -2514,14 +2667,19 @@ void GameServer::initializeCommandHandlers()
 				        // Update in spatial grid
 				        spatialGrid.updateEntity(playerId, oldPos, newPos);
 
-				        // Send teleport confirmation and message
-				        sendTeleport(player, newPos);
-				        sendSystemMessage(player, "Teleported to X=" + args[1] + " Y=" + args[2] + " Z=" + args[3]);
+				        // Send teleport packet
+				        auto teleportPacket = PacketManager::createTeleport(newPos);
+				        sendPacket(player.peer, *teleportPacket, true);
+
+				        // Send confirmation message
+				        auto msgPacket = PacketManager::createSystemMessage("Teleported to X=" + args[1] + " Y=" + args[2] + " Z=" + args[3]);
+				        sendPacket(player.peer, *msgPacket, true);
 			        });
 		}
 		catch (const std::exception& e)
 		{
-			sendSystemMessage(player, "Invalid coordinates: " + std::string(e.what()));
+			auto packet = PacketManager::createSystemMessage("Invalid coordinates: " + std::string(e.what()));
+			sendPacket(player.peer, *packet, true);
 		}
 	};
 
@@ -2552,7 +2710,8 @@ void GameServer::initializeCommandHandlers()
 			        // Send the header message
 			        std::stringstream ss;
 			        ss << "Online players (" << authenticatedCount << "):";
-			        sendSystemMessage(requesterIt->second, ss.str());
+			        auto headerPacket = PacketManager::createSystemMessage(ss.str());
+			        sendPacket(requesterIt->second.peer, *headerPacket, true);
 
 			        // Send each player in the list
 			        for (const auto& pair: players)
@@ -2560,7 +2719,8 @@ void GameServer::initializeCommandHandlers()
 				        if (pair.second.isAuthenticated)
 				        {
 					        std::string adminTag = pair.second.isAdmin ? " [ADMIN]" : "";
-					        sendSystemMessage(requesterIt->second, "- " + pair.second.name + adminTag);
+					        auto playerPacket = PacketManager::createSystemMessage("- " + pair.second.name + adminTag);
+					        sendPacket(requesterIt->second.peer, *playerPacket, true);
 				        }
 			        }
 		        });
@@ -2571,7 +2731,8 @@ void GameServer::initializeCommandHandlers()
 	{
 		if (args.size() < 2)
 		{
-			sendSystemMessage(player, "Usage: /me action");
+			auto packet = PacketManager::createSystemMessage("Usage: /me action");
+			sendPacket(player.peer, *packet, true);
 			return;
 		}
 
@@ -2585,7 +2746,39 @@ void GameServer::initializeCommandHandlers()
 		}
 
 		// Broadcast action message - Schedule as a task
-		threadManager.scheduleTask([this, playerName = player.name, action]() { broadcastChatMessage("ACTION", playerName + " " + action); });
+		threadManager.scheduleTask(
+		        [this, playerName = player.name, action]()
+		        {
+			        // Create a chat message with a special "ACTION" sender to indicate this is an action
+			        auto packet = PacketManager::createChatMessage("ACTION", playerName + " " + action);
+
+			        // Schedule a resource task that requires Players resource
+			        threadManager.scheduleResourceTask({ GameResources::PlayersId },
+			                [this, packet = std::move(packet)]()
+			                {
+				                // Collect all authenticated players' peers
+				                std::vector<ENetPeer*> authenticatedPeers;
+
+				                for (auto& pair: players)
+				                {
+					                if (pair.second.isAuthenticated && pair.second.peer != nullptr)
+					                {
+						                authenticatedPeers.push_back(pair.second.peer);
+					                }
+				                }
+
+				                // Release resources before sending packets
+				                // Schedule a separate task for sending packets to avoid holding resources
+				                threadManager.scheduleTask(
+				                        [this, authenticatedPeers, packet = std::move(packet)]()
+				                        {
+					                        for (ENetPeer* peer: authenticatedPeers)
+					                        {
+						                        sendPacket(peer, *packet, true);
+					                        }
+				                        });
+			                });
+		        });
 	};
 
 	// Whisper command - Needs read access to find target player
@@ -2593,7 +2786,8 @@ void GameServer::initializeCommandHandlers()
 	{
 		if (args.size() < 3)
 		{
-			sendSystemMessage(player, "Usage: /w username message");
+			auto packet = PacketManager::createSystemMessage("Usage: /w username message");
+			sendPacket(player.peer, *packet, true);
 			return;
 		}
 
@@ -2632,16 +2826,18 @@ void GameServer::initializeCommandHandlers()
 
 			        if (targetPlayer != nullptr)
 			        {
-				        // Send to target
-				        std::string targetMsg = "CHAT:*WHISPER* " + senderIt->second.name + ":" + message;
-				        sendPacket(targetPlayer->peer, targetMsg, true);
+				        // Send to target - create a chat message with special WHISPER format
+				        auto whisperPacket = PacketManager::createChatMessage("*WHISPER* " + senderIt->second.name, message, false); // false for not global
+				        sendPacket(targetPlayer->peer, *whisperPacket, true);
 
 				        // Send confirmation to sender
-				        sendSystemMessage(senderIt->second, "Whisper to " + targetName + ": " + message);
+				        auto confirmPacket = PacketManager::createSystemMessage("Whisper to " + targetName + ": " + message);
+				        sendPacket(senderIt->second.peer, *confirmPacket, true);
 			        }
 			        else
 			        {
-				        sendSystemMessage(senderIt->second, "Player not found: " + targetName);
+				        auto errorPacket = PacketManager::createSystemMessage("Player not found: " + targetName);
+				        sendPacket(senderIt->second.peer, *errorPacket, true);
 			        }
 		        });
 	};
@@ -2653,13 +2849,15 @@ void GameServer::initializeCommandHandlers()
 	{
 		if (!player.isAdmin)
 		{
-			sendSystemMessage(player, "You don't have permission to use this command");
+			auto packet = PacketManager::createSystemMessage("You don't have permission to use this command");
+			sendPacket(player.peer, *packet, true);
 			return;
 		}
 
 		if (args.size() < 2)
 		{
-			sendSystemMessage(player, "Usage: /kick username");
+			auto packet = PacketManager::createSystemMessage("Usage: /kick username");
+			sendPacket(player.peer, *packet, true);
 			return;
 		}
 
@@ -2673,7 +2871,8 @@ void GameServer::initializeCommandHandlers()
 			        // Note: kickPlayer has been refactored to use resource tasks internally
 		        });
 
-		sendSystemMessage(player, "Attempting to kick player: " + targetName);
+		auto packet = PacketManager::createSystemMessage("Attempting to kick player: " + targetName);
+		sendPacket(player.peer, *packet, true);
 	};
 
 	// Ban command - Similar to kick
@@ -2681,13 +2880,15 @@ void GameServer::initializeCommandHandlers()
 	{
 		if (!player.isAdmin)
 		{
-			sendSystemMessage(player, "You don't have permission to use this command");
+			auto packet = PacketManager::createSystemMessage("You don't have permission to use this command");
+			sendPacket(player.peer, *packet, true);
 			return;
 		}
 
 		if (args.size() < 2)
 		{
-			sendSystemMessage(player, "Usage: /ban username");
+			auto packet = PacketManager::createSystemMessage("Usage: /ban username");
+			sendPacket(player.peer, *packet, true);
 			return;
 		}
 
@@ -2701,7 +2902,8 @@ void GameServer::initializeCommandHandlers()
 			        // Note: banPlayer has been refactored to use resource tasks internally
 		        });
 
-		sendSystemMessage(player, "Attempting to ban player: " + targetName);
+		auto packet = PacketManager::createSystemMessage("Attempting to ban player: " + targetName);
+		sendPacket(player.peer, *packet, true);
 	};
 
 	// Broadcast command - Just broadcasts a message
@@ -2709,13 +2911,15 @@ void GameServer::initializeCommandHandlers()
 	{
 		if (!player.isAdmin)
 		{
-			sendSystemMessage(player, "You don't have permission to use this command");
+			auto packet = PacketManager::createSystemMessage("You don't have permission to use this command");
+			sendPacket(player.peer, *packet, true);
 			return;
 		}
 
 		if (args.size() < 2)
 		{
-			sendSystemMessage(player, "Usage: /broadcast message");
+			auto packet = PacketManager::createSystemMessage("Usage: /broadcast message");
+			sendPacket(player.peer, *packet, true);
 			return;
 		}
 
@@ -2732,7 +2936,35 @@ void GameServer::initializeCommandHandlers()
 		threadManager.scheduleTask(
 		        [this, message, playerName = player.name]()
 		        {
-			        broadcastSystemMessage("[Broadcast] " + message);
+			        // Create system message for broadcast
+			        auto broadcastPacket = PacketManager::createSystemMessage("[Broadcast] " + message);
+
+			        // Schedule a resource task to get all players
+			        threadManager.scheduleResourceTask({ GameResources::PlayersId },
+			                [this, packet = std::move(broadcastPacket)]()
+			                {
+				                // Collect all authenticated players' peers
+				                std::vector<ENetPeer*> authenticatedPeers;
+
+				                for (auto& pair: players)
+				                {
+					                if (pair.second.isAuthenticated && pair.second.peer != nullptr)
+					                {
+						                authenticatedPeers.push_back(pair.second.peer);
+					                }
+				                }
+
+				                // Release resources before sending packets
+				                threadManager.scheduleTask(
+				                        [this, authenticatedPeers, packet = std::move(packet)]()
+				                        {
+					                        for (ENetPeer* peer: authenticatedPeers)
+					                        {
+						                        sendPacket(peer, *packet, true);
+					                        }
+				                        });
+			                });
+
 			        logger.info("Admin broadcast from " + playerName + ": " + message);
 		        });
 	};
@@ -2742,13 +2974,15 @@ void GameServer::initializeCommandHandlers()
 	{
 		if (!player.isAdmin)
 		{
-			sendSystemMessage(player, "You don't have permission to use this command");
+			auto packet = PacketManager::createSystemMessage("You don't have permission to use this command");
+			sendPacket(player.peer, *packet, true);
 			return;
 		}
 
 		if (args.size() < 2)
 		{
-			sendSystemMessage(player, "Usage: /setadmin username");
+			auto packet = PacketManager::createSystemMessage("Usage: /setadmin username");
+			sendPacket(player.peer, *packet, true);
 			return;
 		}
 
@@ -2766,11 +3000,13 @@ void GameServer::initializeCommandHandlers()
 
 		if (success)
 		{
-			sendSystemMessage(player, "Admin status granted to " + targetName);
+			auto packet = PacketManager::createSystemMessage("Admin status granted to " + targetName);
+			sendPacket(player.peer, *packet, true);
 		}
 		else
 		{
-			sendSystemMessage(player, "Failed to set admin status for " + targetName);
+			auto packet = PacketManager::createSystemMessage("Failed to set admin status for " + targetName);
+			sendPacket(player.peer, *packet, true);
 		}
 	};
 
@@ -2779,13 +3015,15 @@ void GameServer::initializeCommandHandlers()
 	{
 		if (!player.isAdmin)
 		{
-			sendSystemMessage(player, "You don't have permission to use this command");
+			auto packet = PacketManager::createSystemMessage("You don't have permission to use this command");
+			sendPacket(player.peer, *packet, true);
 			return;
 		}
 
 		if (args.size() < 2)
 		{
-			sendSystemMessage(player, "Usage: /tpplayer username");
+			auto packet = PacketManager::createSystemMessage("Usage: /tpplayer username");
+			sendPacket(player.peer, *packet, true);
 			return;
 		}
 
@@ -2825,13 +3063,18 @@ void GameServer::initializeCommandHandlers()
 				        // Update in spatial grid
 				        spatialGrid.updateEntity(adminId, oldPos, newPos);
 
-				        // Send teleport confirmation
-				        sendTeleport(adminIt->second, newPos);
-				        sendSystemMessage(adminIt->second, "Teleported to player: " + targetName);
+				        // Send teleport packet
+				        auto teleportPacket = PacketManager::createTeleport(newPos);
+				        sendPacket(adminIt->second.peer, *teleportPacket, true);
+
+				        // Send confirmation message
+				        auto msgPacket = PacketManager::createSystemMessage("Teleported to player: " + targetName);
+				        sendPacket(adminIt->second.peer, *msgPacket, true);
 			        }
 			        else
 			        {
-				        sendSystemMessage(adminIt->second, "Player not found: " + targetName);
+				        auto packet = PacketManager::createSystemMessage("Player not found: " + targetName);
+				        sendPacket(adminIt->second.peer, *packet, true);
 			        }
 		        });
 	};

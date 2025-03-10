@@ -27,6 +27,7 @@
 #include "SpatialGrid.h"
 #include "Structs.h"
 #include "ThreadManager.h"
+#include "PacketManager.h"
 
 // Command handler function type
 using CommandHandler = std::function<void(const Player&, const std::vector<std::string>&)>;
@@ -110,6 +111,8 @@ namespace GameResources
 class GameServer
 {
 public:
+	friend class PluginManager;
+
 	// Constructor and destructor
 	GameServer();
 	~GameServer();
@@ -127,7 +130,6 @@ public:
 
 	std::vector<std::string> getLoadedPlugins() const;
 
-	void sendSystemMessage(const Player& player, const std::string& message);
 	void broadcastSystemMessage(const std::string& message);
 
 	std::vector<std::string> getOnlinePlayerNames();
@@ -135,6 +137,9 @@ public:
 	Logger logger;
 
 private:
+	// Packet manager instance
+	PacketManager packetManager;
+
 	// Network
 	ENetHost* server = nullptr;
 	bool isRunning = false;
@@ -205,13 +210,16 @@ private:
 	void handleChatMessage(const Player& player, const std::string& message);
 	void handlePingMessage(const Player& player, const std::string& pingData);
 	void handleCommandMessage(const Player& player, const std::string& commandStr);
-	void sendAuthResponse(ENetPeer* peer, bool success, const std::string& message);
-	void sendPacket(ENetPeer* peer, const std::string& message, bool reliable);
-	void sendSystemMessage(uint32_t playerId, const std::string& message);
-	void sendTeleport(const Player& player, const Position& position);
-	void broadcastWorldState();
+
+    void sendPacket(ENetPeer* peer, const GameProtocol::Packet& packet, bool reliable);
+    void sendSystemMessage(const Player& player, const std::string& message);
+    void sendAuthResponse(ENetPeer* peer, bool success, const std::string& message, uint32_t playerId = 0);
+    void sendTeleport(const Player& player, const Position& position);
+    void broadcastChatMessage(const std::string& sender, const std::string& message);
+    void broadcastWorldState();
+	void handlePacket(const Player& player, std::unique_ptr<GameProtocol::Packet> packet);
+
 	void checkTimeouts();
-	void broadcastChatMessage(const std::string& sender, const std::string& message);
 	void savePlayerData(const std::string& username, const Position& lastPos);
 	void loadAuthData();
 	void saveAuthData();
