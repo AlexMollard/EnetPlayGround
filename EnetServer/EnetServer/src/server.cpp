@@ -12,7 +12,7 @@
 
 // Constructor
 GameServer::GameServer()
-      : dbManager(logger), threadManager(), packetManager(logger)
+      : dbManager(logger), threadManager()
 {
 	// Set up logger
 	logger.info("Initializing server...");

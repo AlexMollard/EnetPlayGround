@@ -4,16 +4,18 @@
 #include <fstream>
 #include <nlohmann/json.hpp/json.hpp>
 
+#include "Logger.h"
+
 using json = nlohmann::json;
 namespace fs = std::filesystem;
 
-ThemeManager::ThemeManager(Logger& logger, bool isDebuggerAttached)
-      : logger(logger), isDebuggerAttached(isDebuggerAttached)
+ThemeManager::ThemeManager()
 {
 	createDefaultThemes();
 	loadTheme("current_theme.json");
 	if (themes.find(currentTheme.name) == themes.end())
 	{
+		Logger& logger = Logger::getInstance();
 		logger.warning("No default theme json was found");
 		currentTheme = themes["Dark"];
 	}
@@ -26,6 +28,8 @@ ImVec4 jsonToImVec4(const json& j)
 
 void ThemeManager::createDefaultThemes()
 {
+	Logger& logger = Logger::getInstance();
+
 	const std::string resDir = isDebuggerAttached ? "../../res/" : "";
 	fs::path themesPath = resDir + "themes";
 	if (fs::exists(themesPath) && fs::is_directory(themesPath))
@@ -47,6 +51,8 @@ void ThemeManager::createDefaultThemes()
 
 void ThemeManager::loadThemeFromFile(const std::string& filename)
 {
+	Logger& logger = Logger::getInstance();
+
 	//logger.info("Loading theme from file: " + filename);
 	std::ifstream file(filename);
 	if (file.is_open())
@@ -167,6 +173,8 @@ void ThemeManager::saveTheme(const std::string& filename)
 
 void ThemeManager::loadTheme(const std::string& filename)
 {
+	Logger& logger = Logger::getInstance();
+
 	//logger.debug("Loading theme: " + filename);
 	std::ifstream file(filename);
 	if (file.is_open())
@@ -228,6 +236,8 @@ void ThemeManager::loadTheme(const std::string& filename)
 
 void ThemeManager::applyTheme()
 {
+	Logger& logger = Logger::getInstance();
+
 	ImGuiStyle& style = ImGui::GetStyle();
 
 	// Set style parameters

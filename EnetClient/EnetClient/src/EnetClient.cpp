@@ -45,12 +45,16 @@ int main(int argc, char* argv[])
 	params.imGuiWindowParams.defaultImGuiWindowType = HelloImGui::DefaultImGuiWindowType::ProvideFullScreenDockSpace;
 	params.imGuiWindowParams.showMenuBar = false;
 	params.imGuiWindowParams.showStatusBar = false;
+	
+	// Get the logger
+	Logger& logger = Logger::getInstance();
 
 	// Create game client - pass command line parameters to constructor
-	std::shared_ptr<GameClient> client = std::make_shared<GameClient>(IsDebuggerPresent());
+	std::shared_ptr<GameClient> client = std::make_shared<GameClient>();
+
 
 	// Setup font loading callback
-	params.callbacks.LoadAdditionalFonts = [&client]()
+	params.callbacks.LoadAdditionalFonts = [&logger]()
 	{
 		const std::string resDir = IsDebuggerPresent() ? "../../res/" : "";
 		ImGuiIO& io = ImGui::GetIO();
@@ -74,7 +78,7 @@ int main(int argc, char* argv[])
 			FontConfig regularFont{ resDir + "WorkSans-Regular.ttf", BASE_FONT_SIZE, nullptr, &baseConfig };
 			if (!LoadFont(regularFont, io.Fonts))
 			{
-				client->getLogger().error("Failed to load regular font");
+				logger.error("Failed to load regular font");
 			}
 
 			// Icons config to merge with regular font
@@ -90,7 +94,7 @@ int main(int argc, char* argv[])
 			FontConfig iconFont{ resDir + "lucide.ttf", BASE_FONT_SIZE, icons_ranges, &iconsConfig };
 			if (!LoadFont(iconFont, io.Fonts))
 			{
-				client->getLogger().error("Failed to load icon font for regular");
+				logger.error("Failed to load icon font for regular");
 			}
 		}
 
@@ -105,7 +109,7 @@ int main(int argc, char* argv[])
 			FontConfig headerFont{ resDir + "WorkSans-Bold.ttf", HEADER_FONT_SIZE, nullptr, &headerConfig };
 			if (!LoadFont(headerFont, io.Fonts))
 			{
-				client->getLogger().error("Failed to load header font");
+				logger.error("Failed to load header font");
 			}
 
 			// Icons config to merge with header font
@@ -121,7 +125,7 @@ int main(int argc, char* argv[])
 			FontConfig iconFont{ resDir + "lucide.ttf", HEADER_FONT_SIZE, icons_ranges, &iconsConfig };
 			if (!LoadFont(iconFont, io.Fonts))
 			{
-				client->getLogger().error("Failed to load icon font for header");
+				logger.error("Failed to load icon font for header");
 			}
 		}
 
@@ -136,7 +140,7 @@ int main(int argc, char* argv[])
 			FontConfig boldFont{ resDir + "WorkSans-Bold.ttf", BASE_FONT_SIZE, nullptr, &boldConfig };
 			if (!LoadFont(boldFont, io.Fonts))
 			{
-				client->getLogger().error("Failed to load bold font");
+				logger.error("Failed to load bold font");
 			}
 		}
 
@@ -151,7 +155,7 @@ int main(int argc, char* argv[])
 			FontConfig monoFont{ resDir + "JetBrainsMono.ttf", BASE_FONT_SIZE, nullptr, &monoConfig };
 			if (!LoadFont(monoFont, io.Fonts))
 			{
-				client->getLogger().error("Failed to load monospace font");
+				logger.error("Failed to load monospace font");
 			}
 		}
 
@@ -166,30 +170,15 @@ int main(int argc, char* argv[])
 			FontConfig italicsFont{ resDir + "WorkSans-Italic.ttf", BASE_FONT_SIZE, nullptr, &italicsConfig };
 			if (!LoadFont(italicsFont, io.Fonts))
 			{
-				client->getLogger().error("Failed to load italics font");
+				logger.error("Failed to load italics font");
 			}
 		}
 
 		io.FontGlobalScale = 1.0f;
-		client->getLogger().debug("Fonts loaded!");
+		logger.debug("Fonts loaded!");
 
 		// Log the number of loaded fonts for debugging
-		client->getLogger().debug("Total fonts loaded: " + std::to_string(io.Fonts->Fonts.Size));
-	};
-
-	// Configure ImGui style
-	params.callbacks.SetupImGuiStyle = [client]() { client->applyTheme(); };
-
-	// Initialize the client, but don't connect yet - let the user initiate connection from UI
-	params.callbacks.PostInit = [client]()
-	{
-		// Initialize network components only
-		if (!client->initialize())
-		{
-			std::cerr << "Failed to initialize client. Exiting." << std::endl;
-			HelloImGui::GetRunnerParams()->appShallExit = true;
-			return;
-		}
+		logger.debug("Total fonts loaded: " + std::to_string(io.Fonts->Fonts.Size));
 	};
 
 	// Set the rendering callback
@@ -199,13 +188,6 @@ int main(int argc, char* argv[])
 	params.callbacks.PreNewFrame = [client]()
 	{
 		client->updateNetwork();
-	};
-
-	// Handle clean exit
-	params.callbacks.BeforeExit = [client]()
-	{
-		// Perform clean shutdown
-		client->disconnect();
 	};
 
 	// Run the Hello ImGui application

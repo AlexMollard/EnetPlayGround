@@ -23,7 +23,7 @@ public:
      * @param logger Reference to the logger
      * @param networkManager Shared pointer to the network manager
      */
-	AuthManager(Logger& logger, std::shared_ptr<NetworkManager> networkManager, std::shared_ptr<ThreadManager> threadManager = nullptr);
+	AuthManager(std::shared_ptr<NetworkManager> networkManager, std::shared_ptr<ThreadManager> threadManager = nullptr);
 
 	/**
      * Destructor
@@ -113,7 +113,7 @@ private:
 	std::function<void(const std::string&)> authFailedCallback;
 
 	// Dependencies
-	Logger& logger;
+	Logger& logger = Logger::getInstance();
 	std::shared_ptr<NetworkManager> networkManager;
 
 	/**

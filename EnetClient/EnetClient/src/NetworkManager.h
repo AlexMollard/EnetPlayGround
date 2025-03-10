@@ -146,7 +146,7 @@ public:
 	static constexpr uint8_t PRIORITY_NORMAL = 128;
 	static constexpr uint8_t PRIORITY_LOW = 192;
 
-	NetworkManager(Logger& logger, std::shared_ptr<ThreadManager> threadManager = nullptr);
+	NetworkManager(std::shared_ptr<ThreadManager> threadManager = nullptr);
 	~NetworkManager();
 
 	bool initialize();
@@ -160,7 +160,6 @@ public:
 	void sendPacket(std::shared_ptr<GameProtocol::Packet> packet, bool reliable);
 	void queuePacket(const std::string& data, bool reliable, uint8_t priority);
 	void sendPacketWithPriority(std::shared_ptr<GameProtocol::Packet> packet, bool reliable, uint8_t priority);
-	void sendPositionUpdate(float x, float y, float z, float lastX, float lastY, float lastZ, bool useCompressedUpdates, float movementThreshold);
 
 	// Network processing
 	void update(const std::function<void()>& updatePositionCallback, const std::function<void(const ENetPacket*)>& handlePacketCallback, const std::function<void()>& disconnectCallback);
@@ -326,6 +325,16 @@ public:
 		return &packetManager;
 	}
 
+	ENetPeer* getServer()
+	{
+		return server;
+	}
+
+	const bool isCompressionEnabled() const
+	{
+		return compressionEnabled;
+	}
+
 private:
 	// Mutexes for thread safety
 	mutable std::mutex enetMutex;                    // Protects all ENet operations
@@ -458,7 +467,7 @@ private:
 	std::shared_ptr<ThreadManager> threadManager;
 
 	// Dependencies
-	Logger& logger;
+	Logger& logger = Logger::getInstance();
 
 	// Private methods
 	uint64_t getCurrentTimeMs();

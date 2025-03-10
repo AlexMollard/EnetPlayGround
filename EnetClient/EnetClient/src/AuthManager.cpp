@@ -7,8 +7,8 @@
 #include "NetworkManager.h"
 #include "PacketTypes.h"
 
-AuthManager::AuthManager(Logger& logger, std::shared_ptr<NetworkManager> networkManager, std::shared_ptr<ThreadManager> threadManager)
-      : logger(logger), networkManager(networkManager), threadManager(threadManager)
+AuthManager::AuthManager(std::shared_ptr<NetworkManager> networkManager, std::shared_ptr<ThreadManager> threadManager)
+      : networkManager(networkManager), threadManager(threadManager)
 {
 	logger.debug("Initializing AuthManager");
 

@@ -65,8 +65,8 @@ void NetworkDiagnostics::reset()
 }
 
 // Constructor with enhanced initialization
-NetworkManager::NetworkManager(Logger& logger, std::shared_ptr<ThreadManager> threadManager)
-      : logger(logger), bandwidthTokenBucket(0, 0), threadManager(threadManager), packetManager(logger)
+NetworkManager::NetworkManager(std::shared_ptr<ThreadManager> threadManager)
+      : bandwidthTokenBucket(0, 0), threadManager(threadManager)
 {
 	logger.debug("Initializing Enhanced NetworkManager");
 
@@ -956,74 +956,6 @@ void NetworkManager::clearPacketQueue()
 size_t NetworkManager::getQueuedPacketCount()
 {
 	return outgoingQueue.size();
-}
-
-void NetworkManager::sendPositionUpdate(float x, float y, float z, float lastX, float lastY, float lastZ, bool useCompressedUpdates, float movementThreshold)
-{
-	// First check if we're connected to avoid wasted calculations
-	bool currentlyConnected = threadManager->scheduleReadTaskWithResult({ GameResources::networkResourceId }, [this]() -> bool { return isConnected; }).get();
-
-	if (!currentlyConnected)
-		return;
-
-	// Validate position values
-	if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z))
-	{
-		logger.error("Invalid position values: (" + (std::isfinite(x) ? std::to_string(x) : "NaN/Inf") + ", " + (std::isfinite(y) ? std::to_string(y) : "NaN/Inf") + ", " + (std::isfinite(z) ? std::to_string(z) : "NaN/Inf") + ")");
-		return;
-	}
-
-	// Calculate movement distance with validation
-	float moveDistance = 0.0f;
-	if (std::isfinite(lastX) && std::isfinite(lastY) && std::isfinite(lastZ))
-	{
-		moveDistance = (float) std::sqrt(pow(x - lastX, 2) + pow(y - lastY, 2) + pow(z - lastZ, 2));
-	}
-	else
-	{
-		// Can't calculate move distance with invalid last position, force an update
-		moveDistance = movementThreshold * 2.0f;
-	}
-
-	// Only send if position has changed significantly
-	if (moveDistance < movementThreshold)
-		return;
-
-	// Get the server peer
-	ENetPeer* serverPeer = getServerPeer();
-	if (!serverPeer)
-	{
-		return;
-	}
-
-	// Create the position struct
-	Position position;
-	position.x = x;
-	position.y = y;
-	position.z = z;
-
-	if (useCompressedUpdates && moveDistance >= movementThreshold)
-	{
-		// Use delta position update for optimized bandwidth
-		auto deltaPacket = packetManager.createDeltaPositionUpdate(position);
-		packetManager.sendPacket(serverPeer, *deltaPacket, false); // Unreliable for position
-	}
-	else
-	{
-		// Use full position update (more bandwidth but simpler)
-		// Note: We need a player ID for this, should be obtained from auth response
-		uint32_t playerId = 0; // Would need to get this from somewhere, e.g. auth manager
-		auto posPacket = packetManager.createPositionUpdate(playerId, position);
-		packetManager.sendPacket(serverPeer, *posPacket, false); // Unreliable for position
-	}
-
-	// Update bandwidth statistics
-	threadManager->scheduleResourceTask({ GameResources::bandwidthResourceId },
-	        [this]()
-	        {
-		        // Update network activity timestamp
-		        lastNetworkActivity = getCurrentTimeMs();
-	        });
 }
 
 // The update method needs refactoring to use ThreadManager

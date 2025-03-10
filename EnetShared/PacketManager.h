@@ -13,10 +13,7 @@
 class PacketManager
 {
 public:
-	PacketManager(Logger& logger)
-	      : logger(logger)
-	{
-	}
+	PacketManager() = default;
 
 	// Send a packet to a peer
 	void sendPacket(ENetPeer* peer, const GameProtocol::Packet& packet, bool reliable, std::function<void(size_t)> statsCallback = nullptr)
@@ -137,5 +134,5 @@ public:
 	}
 
 private:
-	Logger& logger;
+	Logger& logger = Logger::getInstance();
 };
