@@ -15,6 +15,12 @@
 #    endif
 #endif
 
+#ifdef _WIN32
+#	include <windows.h>
+// Define the function pointer type for SetThreadDescription
+typedef HRESULT(WINAPI* SetThreadDescriptionFn)(HANDLE hThread, PCWSTR lpThreadDescription);
+#endif
+
 #include "thread_safe_queue.h"
 
 namespace dp {
@@ -259,6 +265,36 @@ namespace dp {
 
             return removed_task_count;
         }
+
+		/**
+        * Name all the threads in the pool
+        */
+		void name_all_threads(const std::string& name)
+		{
+			for (std::size_t i = 0; i < threads_.size(); ++i)
+			{
+				// Create thread name with index
+				std::string thread_name = name + "_" + std::to_string(i);
+
+                // Get native handle
+				auto native_handle = threads_[i].native_handle();
+				HMODULE hKernelBase = GetModuleHandleA("KernelBase.dll");
+
+				if (hKernelBase)
+				{
+					// Get the address of the SetThreadDescription function
+					auto SetThreadDescription = reinterpret_cast<SetThreadDescriptionFn>(GetProcAddress(hKernelBase, "SetThreadDescription"));
+
+					if (SetThreadDescription)
+					{
+						// Convert string to wide string for Windows API
+						std::wstring wthread_name(thread_name.begin(), thread_name.end());
+						// Set the thread name
+						SetThreadDescription(native_handle, wthread_name.c_str());
+					}
+				}
+			}
+		}
 
       private:
         template <typename Function>

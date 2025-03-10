@@ -61,9 +61,11 @@ public:
      * Constructor creates a thread pool with the specified number of threads
      * @param numThreads Number of worker threads (default = hardware concurrency - 1)
      */
-	ThreadManager(size_t numThreads = max(1u, std::thread::hardware_concurrency() - 1))
+	ThreadManager(size_t numThreads = max(1u, 4))
 	      : pool((unsigned int)numThreads), numThreads(numThreads)
 	{
+		// Name all threads for easier debugging
+		pool.name_all_threads("ThreadManager");
 	}
 
 	/**
