@@ -1,5 +1,8 @@
 #pragma once
 
+// Debug macro - define this to disable multithreading and run all tasks synchronously
+// #define THREAD_MANAGER_DEBUG
+
 #include <any>
 #include <atomic>
 #include <chrono>
@@ -14,10 +17,9 @@
 #include <typeinfo>
 #include <unordered_map>
 #include <vector>
+#include <Windows.h>
 
 #include "ThreadPool/thread_pool.h"
-
-#include <Windows.h>
 
 /**
  * Resource identifier struct - used to identify resources for synchronization
@@ -62,11 +64,18 @@ public:
      * @param numThreads Number of worker threads (default = hardware concurrency - 1)
      */
 	ThreadManager(size_t numThreads = max(1u, 4))
-	      : pool((unsigned int)numThreads), numThreads(numThreads)
+#ifndef THREAD_MANAGER_DEBUG
+	      : pool((unsigned int) numThreads), numThreads(numThreads)
 	{
 		// Name all threads for easier debugging
 		pool.name_all_threads("ThreadManager");
 	}
+#else
+	      : numThreads(1) // In debug mode, we use just one thread (the calling thread)
+	{
+		// No thread pool to initialize in debug mode
+	}
+#endif
 
 	/**
      * Get the number of threads in the pool
@@ -85,7 +94,12 @@ public:
 	template<typename Func, typename... Args>
 	void scheduleTask(Func&& func, Args&&... args)
 	{
+#ifndef THREAD_MANAGER_DEBUG
 		pool.enqueue_detach(std::forward<Func>(func), std::forward<Args>(args)...);
+#else
+		// In debug mode, execute the task directly in the current thread
+		std::invoke(std::forward<Func>(func), std::forward<Args>(args)...);
+#endif
 
 		// Update stats
 		std::lock_guard<std::mutex> lock(statsMutex);
@@ -101,7 +115,12 @@ public:
 	template<typename Func, typename... Args>
 	auto scheduleTaskWithResult(Func&& func, Args&&... args)
 	{
+#ifndef THREAD_MANAGER_DEBUG
 		auto future = pool.enqueue(std::forward<Func>(func), std::forward<Args>(args)...);
+#else
+		// In debug mode, execute the task directly and return a pre-completed future
+		auto future = std::async(std::launch::deferred, std::forward<Func>(func), std::forward<Args>(args)...);
+#endif
 
 		// Update stats
 		std::lock_guard<std::mutex> lock(statsMutex);
@@ -118,9 +137,14 @@ public:
 	template<typename Func, typename... Args>
 	void scheduleUITask(Func&& func, Args&&... args)
 	{
+#ifndef THREAD_MANAGER_DEBUG
 		// Use a specific tag for UI tasks
 		std::lock_guard<std::mutex> lock(uiMutex);
 		pool.enqueue_detach(std::forward<Func>(func), std::forward<Args>(args)...);
+#else
+		// In debug mode, execute the task directly in the current thread
+		std::invoke(std::forward<Func>(func), std::forward<Args>(args)...);
+#endif
 
 		// Update stats
 		std::lock_guard<std::mutex> statsLock(statsMutex);
@@ -136,7 +160,12 @@ public:
 	template<typename Func, typename... Args>
 	void scheduleNetworkTask(Func&& func, Args&&... args)
 	{
+#ifndef THREAD_MANAGER_DEBUG
 		pool.enqueue_detach(std::forward<Func>(func), std::forward<Args>(args)...);
+#else
+		// In debug mode, execute the task directly in the current thread
+		std::invoke(std::forward<Func>(func), std::forward<Args>(args)...);
+#endif
 
 		// Update stats
 		std::lock_guard<std::mutex> lock(statsMutex);
@@ -153,6 +182,7 @@ public:
 	template<typename Func>
 	void scheduleResourceTask(const std::vector<ResourceId>& resources, Func&& func)
 	{
+#ifndef THREAD_MANAGER_DEBUG
 		// Create a task wrapper that will handle resource locking
 		// Note: use std::function with a shared_ptr to wrap the callable
 		auto sharedFunc = std::make_shared<std::decay_t<Func>>(std::forward<Func>(func));
@@ -223,6 +253,61 @@ public:
 
 		// Submit the wrapped task to the pool
 		pool.enqueue_detach(std::move(taskWrapper));
+#else
+		// In debug mode, acquire resource locks directly and execute the function
+		// Sort resources by name and type to ensure consistent lock order
+		std::vector<ResourceId> sortedResources = resources;
+		std::sort(sortedResources.begin(),
+		        sortedResources.end(),
+		        [](const ResourceId& a, const ResourceId& b)
+		        {
+			        if (a.name != b.name)
+				        return a.name < b.name;
+			        return a.type.hash_code() < b.type.hash_code();
+		        });
+
+		// Collect and lock mutexes
+		std::vector<std::shared_ptr<std::shared_mutex>> mutexPtrs;
+		{
+			std::lock_guard<std::mutex> guard(resourceMutex);
+			for (const auto& resource: sortedResources)
+			{
+				auto& resourceLock = resourceLocks[resource];
+				if (!resourceLock)
+				{
+					resourceLock = std::make_shared<std::shared_mutex>();
+				}
+				mutexPtrs.push_back(resourceLock);
+			}
+		}
+
+		// Lock mutexes in order
+		for (auto& mutex: mutexPtrs)
+		{
+			mutex->lock();
+		}
+
+		// Execute the function
+		try
+		{
+			func();
+		}
+		catch (...)
+		{
+			// Unlock in reverse order in case of exception
+			for (auto it = mutexPtrs.rbegin(); it != mutexPtrs.rend(); ++it)
+			{
+				(*it)->unlock();
+			}
+			throw; // Re-throw the exception
+		}
+
+		// Unlock in reverse order
+		for (auto it = mutexPtrs.rbegin(); it != mutexPtrs.rend(); ++it)
+		{
+			(*it)->unlock();
+		}
+#endif
 
 		// Update stats
 		std::lock_guard<std::mutex> lock(statsMutex);
@@ -251,6 +336,7 @@ public:
 	template<typename ReturnType, typename Func, typename... Args>
 	auto scheduleResourceTaskWithResult(const std::vector<ResourceId>& resources, Func&& func, Args&&... args)
 	{
+#ifndef THREAD_MANAGER_DEBUG
 		// Create the task wrapper - explicitly using ReturnType
 		auto taskWrapper = [this, resources, func = std::forward<Func>(func), args = std::make_tuple(std::forward<Args>(args)...)]() mutable -> ReturnType
 		{
@@ -294,6 +380,67 @@ public:
 
 		// Submit the wrapped task to the pool
 		auto future = pool.enqueue(taskWrapper);
+#else
+		// In debug mode, we execute directly and return a pre-completed future
+		// Sort resources by name and type to ensure consistent lock order
+		std::vector<ResourceId> sortedResources = resources;
+		std::sort(sortedResources.begin(),
+		        sortedResources.end(),
+		        [](const ResourceId& a, const ResourceId& b)
+		        {
+			        if (a.name != b.name)
+				        return a.name < b.name;
+			        return a.type.hash_code() < b.type.hash_code();
+		        });
+
+		// Collect and lock mutexes
+		std::vector<std::shared_ptr<std::shared_mutex>> mutexPtrs;
+		{
+			std::lock_guard<std::mutex> guard(resourceMutex);
+			for (const auto& resource: sortedResources)
+			{
+				auto& resourceLock = resourceLocks[resource];
+				if (!resourceLock)
+				{
+					resourceLock = std::make_shared<std::shared_mutex>();
+				}
+				mutexPtrs.push_back(resourceLock);
+			}
+		}
+
+		// Lock mutexes in order
+		for (auto& mutex: mutexPtrs)
+		{
+			mutex->lock();
+		}
+
+		// Create a future that will hold our result
+		auto future = std::async(std::launch::deferred,
+		        [&]() -> ReturnType
+		        {
+			        try
+			        {
+				        ReturnType result = std::apply(func, std::forward_as_tuple(std::forward<Args>(args)...));
+
+				        // Unlock in reverse order
+				        for (auto it = mutexPtrs.rbegin(); it != mutexPtrs.rend(); ++it)
+				        {
+					        (*it)->unlock();
+				        }
+
+				        return result;
+			        }
+			        catch (...)
+			        {
+				        // Unlock in reverse order in case of exception
+				        for (auto it = mutexPtrs.rbegin(); it != mutexPtrs.rend(); ++it)
+				        {
+					        (*it)->unlock();
+				        }
+				        throw; // Re-throw the exception
+			        }
+		        });
+#endif
 
 		// Update stats
 		std::lock_guard<std::mutex> lock(statsMutex);
@@ -323,6 +470,7 @@ public:
 	template<typename Func, typename... Args>
 	void scheduleReadTask(const std::vector<ResourceId>& resources, Func&& func, Args&&... args)
 	{
+#ifndef THREAD_MANAGER_DEBUG
 		// Create a task wrapper that will handle resource locking
 		auto taskWrapper = [this, resources, func = std::forward<Func>(func), args = std::make_tuple(std::forward<Args>(args)...)]() mutable
 		{
@@ -390,6 +538,61 @@ public:
 
 		// Submit the wrapped task to the pool
 		pool.enqueue_detach(taskWrapper);
+#else
+		// In debug mode, acquire shared resource locks directly and execute the function
+		// Sort resources by name and type to ensure consistent lock order
+		std::vector<ResourceId> sortedResources = resources;
+		std::sort(sortedResources.begin(),
+		        sortedResources.end(),
+		        [](const ResourceId& a, const ResourceId& b)
+		        {
+			        if (a.name != b.name)
+				        return a.name < b.name;
+			        return a.type.hash_code() < b.type.hash_code();
+		        });
+
+		// Collect and lock mutexes
+		std::vector<std::shared_ptr<std::shared_mutex>> mutexPtrs;
+		{
+			std::lock_guard<std::mutex> guard(resourceMutex);
+			for (const auto& resource: sortedResources)
+			{
+				auto& resourceLock = resourceLocks[resource];
+				if (!resourceLock)
+				{
+					resourceLock = std::make_shared<std::shared_mutex>();
+				}
+				mutexPtrs.push_back(resourceLock);
+			}
+		}
+
+		// Lock mutexes in shared mode
+		for (auto& mutex: mutexPtrs)
+		{
+			mutex->lock_shared();
+		}
+
+		// Execute the function
+		try
+		{
+			std::apply(func, std::forward_as_tuple(std::forward<Args>(args)...));
+		}
+		catch (...)
+		{
+			// Unlock in reverse order in case of exception
+			for (auto it = mutexPtrs.rbegin(); it != mutexPtrs.rend(); ++it)
+			{
+				(*it)->unlock_shared();
+			}
+			throw; // Re-throw the exception
+		}
+
+		// Unlock in reverse order
+		for (auto it = mutexPtrs.rbegin(); it != mutexPtrs.rend(); ++it)
+		{
+			(*it)->unlock_shared();
+		}
+#endif
 
 		// Update stats
 		std::lock_guard<std::mutex> lock(statsMutex);
@@ -410,6 +613,7 @@ public:
 		// Get the return type of the function
 		using ReturnType = std::invoke_result_t<Func, Args...>;
 
+#ifndef THREAD_MANAGER_DEBUG
 		// Create the task wrapper
 		auto taskWrapper = [this, resources, func = std::forward<Func>(func), args = std::make_tuple(std::forward<Args>(args)...)]() mutable -> ReturnType
 		{
@@ -453,6 +657,67 @@ public:
 
 		// Submit the wrapped task to the pool
 		auto future = pool.enqueue(taskWrapper);
+#else
+		// In debug mode, we execute directly and return a pre-completed future
+		// Sort resources by name and type to ensure consistent lock order
+		std::vector<ResourceId> sortedResources = resources;
+		std::sort(sortedResources.begin(),
+		        sortedResources.end(),
+		        [](const ResourceId& a, const ResourceId& b)
+		        {
+			        if (a.name != b.name)
+				        return a.name < b.name;
+			        return a.type.hash_code() < b.type.hash_code();
+		        });
+
+		// Collect and lock mutexes
+		std::vector<std::shared_ptr<std::shared_mutex>> mutexPtrs;
+		{
+			std::lock_guard<std::mutex> guard(resourceMutex);
+			for (const auto& resource: sortedResources)
+			{
+				auto& resourceLock = resourceLocks[resource];
+				if (!resourceLock)
+				{
+					resourceLock = std::make_shared<std::shared_mutex>();
+				}
+				mutexPtrs.push_back(resourceLock);
+			}
+		}
+
+		// Create a future that will hold our result
+		auto future = std::async(std::launch::deferred,
+		        [&]() -> ReturnType
+		        {
+			        // Lock mutexes in shared mode
+			        for (auto& mutex: mutexPtrs)
+			        {
+				        mutex->lock_shared();
+			        }
+
+			        try
+			        {
+				        ReturnType result = std::apply(func, std::forward_as_tuple(std::forward<Args>(args)...));
+
+				        // Unlock in reverse order
+				        for (auto it = mutexPtrs.rbegin(); it != mutexPtrs.rend(); ++it)
+				        {
+					        (*it)->unlock_shared();
+				        }
+
+				        return result;
+			        }
+			        catch (...)
+			        {
+				        // Unlock in reverse order in case of exception
+				        for (auto it = mutexPtrs.rbegin(); it != mutexPtrs.rend(); ++it)
+				        {
+					        (*it)->unlock_shared();
+				        }
+				        throw; // Re-throw the exception
+			        }
+		        });
+#endif
 
 		// Update stats
 		std::lock_guard<std::mutex> lock(statsMutex);
@@ -467,7 +732,12 @@ public:
      */
 	void waitForTasks()
 	{
+#ifndef THREAD_MANAGER_DEBUG
 		pool.wait_for_tasks();
+#else
+		// In debug mode, all tasks are already completed since they run synchronously
+		// No waiting needed
+#endif
 	}
 
 	/**
@@ -486,7 +756,11 @@ public:
 		ss << "  Network tasks: " << networkTasksSubmitted << std::endl;
 		ss << "  Resource tasks: " << resourceTasksSubmitted << std::endl;
 		ss << "  Read tasks: " << readTasksSubmitted << std::endl;
+#ifndef THREAD_MANAGER_DEBUG
 		ss << "  Active tasks: " << pool.size() << std::endl;
+#else
+		ss << "  Active tasks: 0 (Debug Mode - Synchronous Execution)" << std::endl;
+#endif
 		ss << "  Active resources: " << resourceLocks.size() << std::endl;
 		return ss.str();
 	}
@@ -503,7 +777,9 @@ public:
 	}
 
 private:
+#ifndef THREAD_MANAGER_DEBUG
 	dp::thread_pool<> pool;
+#endif
 	size_t numThreads;
 
 	// Statistics tracking
