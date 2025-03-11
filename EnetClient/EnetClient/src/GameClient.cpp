@@ -104,6 +104,12 @@ void GameClient::updateNetwork()
 	connectionManager->updateNetwork();
 }
 
+// Set the imgui theme style
+void GameClient::applyTheme()
+{
+	uiManager->applyTheme();
+}
+
 // Draw the UI with ImGui
 void GameClient::drawUI()
 {

@@ -6,6 +6,11 @@
 #include "MarkdownHelper.h"
 #include "Utils.h"
 
+void UIManager::applyTheme()
+{
+	themeManager.applyTheme();
+}
+
 void UIManager::drawUI()
 {
 	Position myPosition = playerManager->getMyPosition();

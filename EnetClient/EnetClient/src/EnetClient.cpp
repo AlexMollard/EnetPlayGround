@@ -184,6 +184,9 @@ int main(int argc, char* argv[])
 	// Set the rendering callback
 	params.callbacks.ShowGui = [client]() { client->drawUI(); };
 
+	// Set the style callback
+	params.callbacks.SetupImGuiStyle = [client]() { client->applyTheme(); };
+
 	// Set the frame callback for network updates
 	params.callbacks.PreNewFrame = [client]()
 	{

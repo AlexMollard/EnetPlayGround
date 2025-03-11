@@ -23,6 +23,7 @@ public:
 
 	void updateNetwork();
 	void drawUI();
+	void applyTheme();
 
 	static CurrentGameState currentGameState;
 private:

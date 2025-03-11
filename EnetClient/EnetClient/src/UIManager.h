@@ -10,6 +10,7 @@ class UIManager
 {
 public:
 	UIManager() = default;
+	void applyTheme();
 	void drawUI();
 	void drawLoginScreen();
 	void drawRegisterScreen();
