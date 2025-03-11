@@ -10,7 +10,7 @@
 #include <vector>
 
 #include "PluginInterface.h"
-#include "ThreadManager.h" // Added ThreadManager
+#include "ThreadPool.h" // Added ThreadPool
 
 #ifdef _WIN32
 #	include <windows.h>
@@ -169,8 +169,8 @@ private:
 	std::unordered_map<std::string, PluginInfo> plugins;
 	mutable std::shared_mutex pluginsMutex;
 
-	// Reference to the ThreadManager from the GameServer
-	ThreadManager* threadManager;
+	// Reference to the ThreadPool from the GameServer
+	ThreadPool* threadPool;
 
 	// Internal helpers
 	LibraryHandle loadLibrary(const std::string& path);

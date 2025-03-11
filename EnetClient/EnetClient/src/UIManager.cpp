@@ -28,7 +28,7 @@ void UIManager::drawUI()
 	ImGui::PopStyleVar();
 
 	ImGui::Begin("Thread Statistics", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
-	ImGui::Text("%s", threadManager->getStatistics());
+	ImGui::Text("%s", threadPool->getStats().c_str());
 	ImGui::End();
 
 	// Check connection state and draw appropriate UI
@@ -1076,7 +1076,7 @@ void UIManager::initiateRegistration()
 	}
 
 	// Use thread manager for registration process
-	threadManager->scheduleNetworkTask(
+	threadPool->write<NetworkLock>("Register",
 	        [this, username, password]()
 	        {
 		        // Ensure NetworkManager is initialized
@@ -1084,7 +1084,7 @@ void UIManager::initiateRegistration()
 		        {
 			        if (!networkManager->initialize())
 			        {
-				        threadManager->scheduleUITask([this]() { registerErrorMessage = "Failed to initialize client"; });
+				        threadPool->write<UILock>("Setting registerErrorMessage", [this]() { registerErrorMessage = "Failed to initialize client"; });
 				        return;
 			        }
 		        }
@@ -1092,7 +1092,7 @@ void UIManager::initiateRegistration()
 		        // Connect to the server
 		        if (!networkManager->connectToServer(networkManager->getServerAddress().c_str(), networkManager->getServerPort()))
 		        {
-			        threadManager->scheduleUITask([this]() { registerErrorMessage = "Failed to connect to server"; });
+			        threadPool->write<UILock>("Setting registerErrorMessage", [this]() { registerErrorMessage = "Failed to connect to server"; });
 			        return;
 		        }
 
@@ -1108,7 +1108,7 @@ void UIManager::initiateRegistration()
 			        networkManager->GetPacketManager()->sendPacket(serverPeer, *regPacket, true);
 
 			        // Update UI state
-			        threadManager->scheduleUITask(
+			        threadPool->write<PlayerLock>("Setting currentGameState and player name",
 			                [this, username, password]()
 			                {
 				                // Set state to wait for registration response
@@ -1122,7 +1122,7 @@ void UIManager::initiateRegistration()
 		        }
 		        else
 		        {
-			        threadManager->scheduleUITask([this]() { registerErrorMessage = "Failed to send registration request"; });
+			        threadPool->write<UILock>("Setting registerErrorMessage", [this]() { registerErrorMessage = "Failed to send registration request"; });
 			        networkManager->disconnect(true);
 		        }
 	        });
@@ -1149,9 +1149,9 @@ void UIManager::setConnectionManager(std::shared_ptr<ConnectionManager> connecti
 	this->connectionManager = connectionManager;
 }
 
-void UIManager::setThreadManager(std::shared_ptr<ThreadManager> threadManager)
+void UIManager::setThreadManager(std::shared_ptr<ThreadPool> threadPool)
 {
-	this->threadManager = threadManager;
+	this->threadPool = threadPool;
 }
 
 const char* UIManager::getLoginUsernameBuffer()

@@ -10,7 +10,7 @@
 
 class NetworkManager;
 class AuthManager;
-class ThreadManager;
+class ThreadPool;
 class UIManager;
 class PlayerManager;
 class ChatManager;
@@ -42,7 +42,7 @@ public:
 	void setPlayerManager(std::shared_ptr<PlayerManager> playerManager);
 	void setAuthManager(std::shared_ptr<AuthManager> authManager);
 	void setNetworkManager(std::shared_ptr<NetworkManager> networkManager);
-	void setThreadManager(std::shared_ptr<ThreadManager> threadManager);
+	void setThreadManager(std::shared_ptr<ThreadPool> threadPool);
 
 private:
 	void handleAuthResponse(const GameProtocol::AuthResponsePacket& packet);
@@ -52,7 +52,7 @@ private:
 
 	std::shared_ptr<NetworkManager> networkManager;
 	std::shared_ptr<AuthManager> authManager;
-	std::shared_ptr<ThreadManager> threadManager;
+	std::shared_ptr<ThreadPool> threadPool;
 	std::shared_ptr<UIManager> uiManager;
 	std::shared_ptr<ChatManager> chatManager;
 	std::shared_ptr<PlayerManager> playerManager;

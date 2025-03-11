@@ -48,6 +48,7 @@ int main(int argc, char* argv[])
 	
 	// Get the logger
 	Logger& logger = Logger::getInstance();
+	logger.setLogLevel(LogLevel::TRACE);
 
 	// Create game client - pass command line parameters to constructor
 	std::shared_ptr<GameClient> client = std::make_shared<GameClient>();

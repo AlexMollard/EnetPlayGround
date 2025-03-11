@@ -6,7 +6,7 @@
 
 #include "Constants.h"
 #include "Logger.h"
-#include "ThreadManager.h"
+#include "ThreadPool.h"
 
 // Forward declarations
 class NetworkManager;
@@ -23,7 +23,7 @@ public:
      * @param logger Reference to the logger
      * @param networkManager Shared pointer to the network manager
      */
-	AuthManager(std::shared_ptr<NetworkManager> networkManager, std::shared_ptr<ThreadManager> threadManager = nullptr);
+	AuthManager(std::shared_ptr<NetworkManager> networkManager, std::shared_ptr<ThreadPool> threadPool = nullptr);
 
 	/**
      * Destructor
@@ -124,5 +124,5 @@ private:
      */
 	std::vector<std::string> splitString(const std::string& str, char delimiter);
 
-	std::shared_ptr<ThreadManager> threadManager;
+	std::shared_ptr<ThreadPool> threadPool;
 };

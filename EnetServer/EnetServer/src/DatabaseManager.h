@@ -26,7 +26,7 @@ using MySQLResultPtr = std::unique_ptr<MYSQL_RES, MySQLResultDeleter>;
 class DatabaseManager
 {
 public:
-	DatabaseManager(Logger& loggerRef);
+	DatabaseManager();
 	~DatabaseManager();
 
 	bool connect();
@@ -60,5 +60,5 @@ private:
 	bool connected;
 
 	// Logger reference
-	Logger& logger;
+	Logger& logger = Logger::getInstance();
 };

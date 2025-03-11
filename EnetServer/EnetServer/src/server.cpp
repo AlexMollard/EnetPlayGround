@@ -12,7 +12,6 @@
 
 // Constructor
 GameServer::GameServer()
-      : dbManager(logger), threadManager()
 {
 	// Set up logger
 	logger.info("Initializing server...");
@@ -386,7 +385,7 @@ void GameServer::shutdown()
 		}
 
 		// Wait for all remaining tasks to complete
-		threadManager.waitForTasks();
+		threadPool.wait();
 	}
 	catch (const std::exception& e)
 	{
@@ -484,9 +483,8 @@ void GameServer::run()
 		}
 		else if (!command.empty())
 		{
-			// Use the thread manager to handle the command processing
-			// This is a low-priority task that doesn't block the main thread
-			threadManager.scheduleTask(
+			// Dont use a resource lock here as the functions inside this lambda will acquire locks as needed
+			threadPool.run(
 			        [this, command]()
 			        {
 				        if (command == "status")
@@ -613,7 +611,7 @@ void GameServer::updateTaskFunc()
 	// Check for plugin updates periodically
 	if (currentTime - lastPluginCheckTime > pluginCheckIntervalMs)
 	{
-		threadManager.scheduleReadTask({ GameResources::PluginsId },
+		threadPool.read<PluginsLock>("Get lastPluginCheckTime",
 		        [this]()
 		        {
 			        pluginManager->checkForPluginUpdates();
@@ -622,7 +620,8 @@ void GameServer::updateTaskFunc()
 	}
 
 	// Synchronize player stats (needs access to Players and PeerStats)
-	threadManager.scheduleResourceTask({ GameResources::PlayersId, GameResources::PeerStatsId },
+	auto resources = ThreadPool::resources<PlayerLock, PeerStatsLock>({ "Players", "PeerStats" });
+	resources.write(threadPool,
 	        [this]()
 	        {
 		        // For each player, copy stats from the lightweight objects
@@ -664,16 +663,18 @@ void GameServer::updateTaskFunc()
 		        {
 			        peerStats.erase(key);
 		        }
-	        });
+	        },
+	        "Sync player stats");
 
 	// Dispatch server tick to plugins
-	threadManager.scheduleReadTask({ GameResources::PluginsId }, [this]() { pluginManager->dispatchServerTick(); });
+	threadPool.write<PluginsLock>("Dispatch Server Tick", [this]() { pluginManager->dispatchServerTick(); });
 
 	// Broadcast world state (needs access to Players and SpatialGrid)
-	threadManager.scheduleReadTask({ GameResources::PlayersId, GameResources::SpatialGridId }, [this]() { broadcastWorldState(); });
+	auto resources2 = ThreadPool::resources<PlayerLock, SpatialGridLock>({ "Players", "SpatialGrid" });
+	resources2.write(threadPool, [this]() { broadcastWorldState(); }, "Broadcast World State");
 
 	// Check for timeouts
-	threadManager.scheduleResourceTask({ GameResources::PlayersId }, [this]() { checkTimeouts(); });
+	threadPool.write<PlayerLock>("Check Timeouts", [this]() { checkTimeouts(); });
 }
 
 // Save thread function
@@ -709,14 +710,15 @@ void GameServer::scheduleRecurringTask(std::function<void()> task, uint32_t inte
 	};
 
 	// Schedule the recurring task and save its future
-	futureHandle = threadManager.scheduleTaskWithResult(recurringTask);
+	futureHandle = threadPool.run(recurringTask);
 }
 
 // Handle client connection
 void GameServer::handleClientConnect(const ENetEvent& event)
 {
 	// Use resource task with write access to Players and the SpatialGrid
-	threadManager.scheduleResourceTask({ GameResources::PlayersId, GameResources::PeerDataId, GameResources::SpatialGridId },
+	auto resources = ThreadPool::resources<PlayerLock, PeerStatsLock, SpatialGridLock>({ "Players", "PeerStats", "SpatialGrid" });
+	resources.write(threadPool,
 	        [this, event]()
 	        {
 		        stats.totalConnections++;
@@ -761,7 +763,8 @@ void GameServer::handleClientConnect(const ENetEvent& event)
 		        {
 			        stats.maxConcurrentPlayers = players.size();
 		        }
-	        });
+	        },
+	        "Handle Client Connect");
 }
 
 // Handle client message
@@ -787,14 +790,9 @@ void GameServer::handleClientMessage(const ENetEvent& event)
 		return;
 	}
 
+	auto resources = ThreadPool::resources<PlayerLock, PeerStatsLock, PeerStatsLock, PluginsLock>({ "Players", "PeerStats", "PeerStats", "Plugins" });
 	// Now handle the message with the appropriate resource access
-	threadManager.scheduleResourceTask(
-	        {
-	                GameResources::PlayersId,   // Need access to players map
-	                GameResources::PeerDataId,  // Need access to peer->data
-	                GameResources::PeerStatsId, // For updating statistics
-	                GameResources::PluginsId    // For plugin event dispatch
-	        },
+	resources.write(threadPool,
 	        [this, event, packetPtr = std::move(packet)]() mutable
 	        {
 		        // Get player ID from peer data
@@ -846,7 +844,8 @@ void GameServer::handleClientMessage(const ENetEvent& event)
 
 		        // Handle the packet based on its type
 		        handlePacket(*player, std::move(packetPtr));
-	        });
+	        },
+	        "Handle Client Message");
 }
 
 void GameServer::handlePacket(const Player& player, std::unique_ptr<GameProtocol::Packet> packetPtr)
@@ -862,7 +861,7 @@ void GameServer::handlePacket(const Player& player, std::unique_ptr<GameProtocol
 			auto& authPacket = static_cast<GameProtocol::AuthRequestPacket&>(packet);
 
 			// Schedule a new task for auth handling
-			threadManager.scheduleTask([this, username = authPacket.username, password = authPacket.password, playerPeer = player.peer]() { handleAuthMessage(username + "," + password, playerPeer); });
+			threadPool.run([this, username = authPacket.username, password = authPacket.password, playerPeer = player.peer]() { handleAuthMessage(username + "," + password, playerPeer); });
 			break;
 		}
 
@@ -872,7 +871,7 @@ void GameServer::handlePacket(const Player& player, std::unique_ptr<GameProtocol
 			auto& regPacket = static_cast<GameProtocol::RegistrationPacket&>(packet);
 
 			// Schedule registration handling
-			threadManager.scheduleTask([this, playerCopy = player, username = regPacket.username, password = regPacket.password]() { handleRegistration(playerCopy, username, password); });
+			threadPool.run([this, playerCopy = player, username = regPacket.username, password = regPacket.password]() { handleRegistration(playerCopy, username, password); });
 			break;
 		}
 
@@ -889,7 +888,8 @@ void GameServer::handlePacket(const Player& player, std::unique_ptr<GameProtocol
 			Position newPos = posPacket.position;
 
 			// Schedule position update with the right resources
-			threadManager.scheduleResourceTask({ GameResources::PlayersId, GameResources::SpatialGridId },
+			auto resources = ThreadPool::resources<PlayerLock, SpatialGridLock>({ "Players", "SpatialGrid" });
+			resources.write(threadPool,
 			        [this, playerId = player.id, newPos]()
 			        {
 				        // Convert to a delta format for the existing method
@@ -897,7 +897,8 @@ void GameServer::handlePacket(const Player& player, std::unique_ptr<GameProtocol
 
 				        // Call existing position update logic
 				        handleDeltaPositionUpdate(playerId, deltaData);
-			        });
+			        },
+			        "Handle Delta Position Update");
 			break;
 		}
 
@@ -913,7 +914,9 @@ void GameServer::handlePacket(const Player& player, std::unique_ptr<GameProtocol
 			auto& chatPacket = static_cast<GameProtocol::ChatMessagePacket&>(packet);
 
 			// Schedule chat handling with the right resources
-			threadManager.scheduleResourceTask({ GameResources::ChatId, GameResources::PlayersId }, [this, playerCopy = player, message = chatPacket.message]() { handleChatMessage(playerCopy, message); });
+			auto resources = ThreadPool::resources<ChatLock, PlayerLock>({ "Chat", "Players" });
+			resources.write(threadPool, [this, playerCopy = player, message = chatPacket.message]() { handleChatMessage(playerCopy, message); }, "Handle Chat Message");
+
 			break;
 		}
 
@@ -939,7 +942,7 @@ void GameServer::handlePacket(const Player& player, std::unique_ptr<GameProtocol
 						std::string password = cmdPacket.arguments[1];
 
 						// Schedule auth handling
-						threadManager.scheduleTask([this, username, password, playerPeer = player.peer]() { handleAuthMessage(username + "," + password, playerPeer); });
+						threadPool.run([this, username, password, playerPeer = player.peer]() { handleAuthMessage(username + "," + password, playerPeer); });
 					}
 					else
 					{
@@ -954,7 +957,7 @@ void GameServer::handlePacket(const Player& player, std::unique_ptr<GameProtocol
 						std::string password = cmdPacket.arguments[1];
 
 						// Schedule registration handling
-						threadManager.scheduleTask([this, playerCopy = player, username, password]() { handleRegistration(playerCopy, username, password); });
+						threadPool.run([this, playerCopy = player, username, password]() { handleRegistration(playerCopy, username, password); });
 					}
 					else
 					{
@@ -965,12 +968,14 @@ void GameServer::handlePacket(const Player& player, std::unique_ptr<GameProtocol
 			}
 
 			// For authenticated players, handle the command normally
-			threadManager.scheduleResourceTask({ GameResources::PlayersId, GameResources::AuthId, GameResources::ChatId },
+			auto resources = ThreadPool::resources<ChatLock, PlayerLock, AuthLock>({ "Chat", "Players", "Auth" });
+			resources.write(threadPool,
 			        [this, playerCopy = player, cmd = cmdPacket.command, args = cmdPacket.arguments]()
 			        {
 				        // Call existing command handler
 				        handleCommandMessage(playerCopy, cmd + " " + Utils::joinStrings(args, " "));
-			        });
+			        },
+			        "Handle Command");
 			break;
 		}
 
@@ -984,10 +989,10 @@ void GameServer::handlePacket(const Player& player, std::unique_ptr<GameProtocol
 			}
 			auto& posPacket = static_cast<GameProtocol::PositionUpdatePacket&>(packet);
 			// Schedule position update with the right resources
-			threadManager.scheduleResourceTask({ GameResources::PlayersId, GameResources::SpatialGridId }, [this, playerId = player.id, newPos = posPacket.position]() { handlePositionUpdate(playerId, newPos); });
+			auto resources = ThreadPool::resources<PlayerLock, SpatialGridLock>({ "Players", "SpatialGrid" });
+			resources.write(threadPool, [this, playerId = player.id, newPos = posPacket.position]() { handlePositionUpdate(playerId, newPos); }, "handlePositionUpdate");
 			break;
 		}
-		
 
 		default:
 			logger.error("Received unknown packet type: " + GameProtocol::getPacketTypeName(packet.getType()));
@@ -1016,14 +1021,8 @@ void GameServer::handlePositionUpdate(uint32_t playerId, const Position& newPos)
 void GameServer::handleClientDisconnect(const ENetEvent& event)
 {
 	// Use a resource task that needs access to all relevant resources
-	threadManager.scheduleResourceTask(
-	        {
-	                GameResources::PeerDataId,    // For peer->data access
-	                GameResources::PeerStatsId,   // For peerStats map
-	                GameResources::PlayersId,     // For players map
-	                GameResources::SpatialGridId, // For spatial grid updates
-	                GameResources::PluginsId      // For plugin dispatch
-	        },
+	auto resources = ThreadPool::resources<PlayerLock, PeerStatsLock, SpatialGridLock, PluginsLock>({ "Players", "PeerStats", "SpatialGrid", "Plugins" });
+	resources.write(threadPool,
 	        [this, event]()
 	        {
 		        // Get player ID from peer data
@@ -1061,9 +1060,8 @@ void GameServer::handleClientDisconnect(const ENetEvent& event)
 				        playerName = it->second.name;
 				        Position lastPos = it->second.position;
 
-				        // Since savePlayerData accesses Auth resource, schedule it separately
-				        // to avoid resource deadlocks
-				        threadManager.scheduleResourceTask({ GameResources::AuthId, GameResources::DatabaseId }, [this, playerName, lastPos]() { savePlayerData(playerName, lastPos); });
+				        auto resourcesTwo = ThreadPool::resources<AuthLock, DatabaseLock>({ "Auth", "Database" });
+				        resourcesTwo.write(threadPool, [this, playerName, lastPos]() { savePlayerData(playerName, lastPos); }, "Save Player Data");
 
 				        // Remove from spatial grid
 				        spatialGrid.removeEntity(playerId, it->second.position);
@@ -1083,9 +1081,10 @@ void GameServer::handleClientDisconnect(const ENetEvent& event)
 		        if (playerId != 0)
 		        {
 			        // Schedule separately since broadcast also needs access to resources
-			        threadManager.scheduleTask([this, playerName]() { broadcastSystemMessage(playerName + " has left the game"); });
+			        threadPool.run([this, playerName]() { broadcastSystemMessage(playerName + " has left the game"); });
 		        }
-	        });
+	        },
+	        "Handle Client Disconnect");
 }
 
 // Handle authentication message
@@ -1099,13 +1098,9 @@ void GameServer::handleAuthMessage(const std::string& authDataStr, ENetPeer* pee
 	}
 
 	// Find player and authenticate - needs access to Players and Auth resources
-	threadManager.scheduleResourceTask(
-	        {
-	                GameResources::PlayersId,    // For accessing players map
-	                GameResources::AuthId,       // For accessing authentication data
-	                GameResources::PeerDataId,   // For peer->data access
-	                GameResources::SpatialGridId // For spatial grid updates
-	        },
+	auto resources = ThreadPool::resources<PlayerLock, AuthLock, PeerStatsLock, SpatialGridLock>({ "Players", "Auth", "PeerStats", "SpatialGrid" });
+
+	resources.write(threadPool,
 	        [this, authDataStr, peer]()
 	        {
 		        // Find player by peer pointer
@@ -1141,7 +1136,7 @@ void GameServer::handleAuthMessage(const std::string& authDataStr, ENetPeer* pee
 			        logger.error("Too many auth attempts from " + player.ipAddress);
 
 			        // Schedule peer disconnect after delay
-			        threadManager.scheduleTask(
+			        threadPool.run(
 			                [this, peerCopy = peer]()
 			                {
 				                std::this_thread::sleep_for(std::chrono::seconds(1));
@@ -1277,11 +1272,10 @@ void GameServer::handleAuthMessage(const std::string& authDataStr, ENetPeer* pee
 		        sendAuthResponse(peer, true, std::to_string(finalPlayerId));
 
 		        // Broadcast join message - scheduling as a separate task
-		        threadManager.scheduleTask([this, finalUsername]() { broadcastSystemMessage(finalUsername + " has joined the game"); });
+		        threadPool.run([this, finalUsername]() { broadcastSystemMessage(finalUsername + " has joined the game"); });
 
-		        // Plugin loggedin event - scheduling as a separate task
-		        // that needs the final player object
-		        threadManager.scheduleResourceTask({ GameResources::PlayersId, GameResources::PluginsId },
+		        auto resourcesTwo = ThreadPool::resources<PluginsLock, PlayerLock>({ "Plugins", "Players" });
+		        resourcesTwo.write(threadPool,
 		                [this, finalPlayerId]()
 		                {
 			                auto it = players.find(finalPlayerId);
@@ -1289,8 +1283,10 @@ void GameServer::handleAuthMessage(const std::string& authDataStr, ENetPeer* pee
 			                {
 				                pluginManager->dispatchPlayerLogin(it->second);
 			                }
-		                });
-	        });
+		                },
+		                "Dispatch Player Login");
+	        },
+	        "Handle Auth Message");
 }
 
 // Handle player registration
@@ -1320,13 +1316,8 @@ void GameServer::handleRegistration(const Player& player, const std::string& use
 	}
 
 	// Now access resources for registration
-	threadManager.scheduleResourceTask(
-	        {
-	                GameResources::AuthId,       // Need access to authenticated players map
-	                GameResources::PlayersId,    // Need access to players map
-	                GameResources::PeerDataId,   // Need access to peer->data
-	                GameResources::SpatialGridId // Need access to spatial grid
-	        },
+	auto resources = ThreadPool::resources<AuthLock, PlayerLock, PeerStatsLock, SpatialGridLock>({ "Auth", "Players", "PeerStats", "SpatialGrid" });
+	resources.write(threadPool,
 	        [this, player, username, password]()
 	        {
 		        bool success = false;
@@ -1367,8 +1358,9 @@ void GameServer::handleRegistration(const Player& player, const std::string& use
 		        {
 			        uint32_t oldKey = player.id == 0 ? reinterpret_cast<uintptr_t>(player.peer) : player.id;
 
-			        // Save auth data immediately - schedule separately to avoid deadlocks
-			        threadManager.scheduleResourceTask({ GameResources::AuthId, GameResources::DatabaseId }, [this]() { saveAuthData(); });
+			        // Save auth data immediately
+			        auto resourcesTwo = ThreadPool::resources<AuthLock, DatabaseLock>({ "Auth", "Database" });
+			        resourcesTwo.write(threadPool, [this]() { saveAuthData(); }, "Save Auth Data");
 
 			        // Create a new player entry
 			        Player registeredPlayer;
@@ -1412,11 +1404,11 @@ void GameServer::handleRegistration(const Player& player, const std::string& use
 			        sendPacket(playerPeer, *authResponsePacket, true);
 
 			        // Send welcome message - schedule as a separate task
-			        threadManager.scheduleTask(
+			        threadPool.run(
 			                [this, newPlayerId, username]()
 			                {
 				                // Find the player by ID
-				                threadManager.scheduleResourceTask({ GameResources::PlayersId },
+				                threadPool.write<PlayerLock>("Send Welcome Message",
 				                        [this, newPlayerId, username]()
 				                        {
 					                        auto it = players.find(newPlayerId);
@@ -1429,14 +1421,14 @@ void GameServer::handleRegistration(const Player& player, const std::string& use
 			                });
 
 			        // Broadcast join message - schedule as a separate task
-			        threadManager.scheduleTask(
+			        threadPool.run(
 			                [this, username]()
 			                {
 				                // Create the message packet
 				                auto joinPacket = PacketManager::createSystemMessage(username + " has joined the game for the first time!");
 
 				                // Schedule a resource task to get all players
-				                threadManager.scheduleResourceTask({ GameResources::PlayersId },
+				                threadPool.write<PlayerLock>("Broadcast Join Message",
 				                        [this, packet = std::move(joinPacket)]()
 				                        {
 					                        // Collect all authenticated players' peers
@@ -1451,7 +1443,7 @@ void GameServer::handleRegistration(const Player& player, const std::string& use
 					                        }
 
 					                        // Release resources before sending packets
-					                        threadManager.scheduleTask(
+					                        threadPool.run(
 					                                [this, authenticatedPeers, packet = std::move(packet)]()
 					                                {
 						                                for (ENetPeer* peer: authenticatedPeers)
@@ -1471,13 +1463,15 @@ void GameServer::handleRegistration(const Player& player, const std::string& use
 			        auto errorPacket = PacketManager::createSystemMessage("Registration failed: " + response);
 			        sendPacket(player.peer, *errorPacket, true);
 		        }
-	        });
+	        },
+	        "Handle Registration");
 }
 
 void GameServer::syncPlayerStats()
 {
 	// Use a resource task that requires access to both the players map and peer stats
-	threadManager.scheduleResourceTask({ GameResources::PlayersId, GameResources::PeerStatsId },
+	auto resources = ThreadPool::resources<PlayerLock, PeerStatsLock>({ "Players", "PeerStats" });
+	resources.write(threadPool,
 	        [this]()
 	        {
 		        // For each player, copy stats from the lightweight objects
@@ -1519,13 +1513,15 @@ void GameServer::syncPlayerStats()
 		        {
 			        peerStats.erase(key);
 		        }
-	        });
+	        },
+	        "Sync Player Stats");
 }
 
 void GameServer::handleDeltaPositionUpdate(uint32_t playerId, const std::string& deltaData)
 {
 	// Use a resource task to safely access and modify the player in the map
-	threadManager.scheduleResourceTask({ GameResources::PlayersId, GameResources::SpatialGridId },
+	auto resources = ThreadPool::resources<PlayerLock, SpatialGridLock>({ "Players", "SpatialGrid" });
+	resources.write(threadPool,
 	        [this, playerId, deltaData]()
 	        {
 		        auto playerIt = players.find(playerId);
@@ -1620,14 +1616,16 @@ void GameServer::handleDeltaPositionUpdate(uint32_t playerId, const std::string&
 		        {
 			        logger.error("Error parsing delta position update from " + player.name + ": " + e.what());
 		        }
-	        });
+	        },
+	        "Handle Delta Position Update");
 }
 
 // Handle sending position to client
 void GameServer::handleSendPosition(uint32_t playerId)
 {
 	// Schedule a resource task that requires Players and SpatialGrid
-	threadManager.scheduleResourceTask({ GameResources::PlayersId, GameResources::SpatialGridId },
+	auto resources = ThreadPool::resources<PlayerLock, SpatialGridLock>({ "Players", "SpatialGrid" });
+	resources.write(threadPool,
 	        [this, playerId]()
 	        {
 		        // Find the player in the map
@@ -1679,7 +1677,7 @@ void GameServer::handleSendPosition(uint32_t playerId)
 			        if (!nearbyPeers.empty())
 			        {
 				        // Need to move the packet to the lambda
-				        threadManager.scheduleTask(
+				        threadPool.run(
 				                [this, nearbyPeers, packet = std::move(positionPacket)]()
 				                {
 					                for (ENetPeer* peer: nearbyPeers)
@@ -1695,7 +1693,8 @@ void GameServer::handleSendPosition(uint32_t playerId)
 		        {
 			        logger.error("Error sending position update to " + player.name + ": " + e.what());
 		        }
-	        });
+	        },
+	        "Handle Send Position");
 }
 
 // Handle chat message
@@ -1715,7 +1714,7 @@ void GameServer::handleChatMessage(const Player& player, const std::string& mess
 	logger.debug("Chat from " + player.name + ": " + message);
 
 	// Use resource tasks for chat history and broadcasting
-	threadManager.scheduleResourceTask({ GameResources::ChatId },
+	threadPool.write<ChatLock>("Handle Chat Message",
 	        [this, playerName = player.name, message]()
 	        {
 		        // Store in chat history
@@ -1740,14 +1739,14 @@ void GameServer::handleChatMessage(const Player& player, const std::string& mess
 	        });
 
 	// Broadcast to all players - schedule separately to avoid holding Chat resource
-	threadManager.scheduleTask(
+	threadPool.run(
 	        [this, playerName = player.name, message]()
 	        {
 		        // Create a properly structured chat message packet
 		        auto chatPacket = PacketManager::createChatMessage(playerName, message, true); // true = global message
 
 		        // Schedule a resource task to get all players
-		        threadManager.scheduleResourceTask({ GameResources::PlayersId },
+		        threadPool.write<PlayerLock>("Broadcast Chat Message",
 		                [this, packet = std::move(chatPacket)]()
 		                {
 			                // Collect all authenticated players' peers
@@ -1762,7 +1761,7 @@ void GameServer::handleChatMessage(const Player& player, const std::string& mess
 			                }
 
 			                // Release resources before sending packets
-			                threadManager.scheduleTask(
+			                threadPool.run(
 			                        [this, authenticatedPeers, packet = std::move(packet)]()
 			                        {
 				                        for (ENetPeer* peer: authenticatedPeers)
@@ -1848,7 +1847,7 @@ void GameServer::sendPacket(ENetPeer* peer, const GameProtocol::Packet& packet, 
 		        stats.totalBytesSent += dataSize;
 
 		        // Update per-peer stats - needs resource access
-		        threadManager.scheduleResourceTask({ GameResources::PeerStatsId }, [this, peer, dataSize]() { peerStats[reinterpret_cast<uintptr_t>(peer)].totalBytesSent += dataSize; });
+		        threadPool.write<PeerStatsLock>("Adding to totalBytesSent", [this, peer, dataSize]() { peerStats[reinterpret_cast<uintptr_t>(peer)].totalBytesSent += dataSize; });
 	        });
 }
 
@@ -1885,7 +1884,7 @@ void GameServer::broadcastChatMessage(const std::string& sender, const std::stri
 	auto packet = PacketManager::createChatMessage(sender, message);
 
 	// Schedule a resource task that requires Players resource
-	threadManager.scheduleResourceTask({ GameResources::PlayersId },
+	threadPool.write<PlayerLock>("Broadcast Chat Message",
 	        [this, packet = std::move(packet)]()
 	        {
 		        // Collect all authenticated players' peers
@@ -1901,7 +1900,7 @@ void GameServer::broadcastChatMessage(const std::string& sender, const std::stri
 
 		        // Release resources before sending packets
 		        // Schedule a separate task for sending packets to avoid holding resources
-		        threadManager.scheduleTask(
+		        threadPool.run(
 		                [this, authenticatedPeers, packet = std::move(packet)]()
 		                {
 			                for (ENetPeer* peer: authenticatedPeers)
@@ -1916,7 +1915,8 @@ void GameServer::broadcastChatMessage(const std::string& sender, const std::stri
 void GameServer::broadcastWorldState()
 {
 	// Use resource task that requires Players and SpatialGrid
-	threadManager.scheduleResourceTask({ GameResources::PlayersId, GameResources::SpatialGridId },
+	auto resources = ThreadPool::resources<PlayerLock, SpatialGridLock>({ "Players", "SpatialGrid" });
+	resources.write(threadPool,
 	        [this]()
 	        {
 		        for (auto& pair: players)
@@ -1977,15 +1977,16 @@ void GameServer::broadcastWorldState()
 
 			        // Send world state (use unreliable packet for frequent updates)
 			        // Do this in a separate task to avoid holding resources during network operations
-			        threadManager.scheduleTask([this, playerPeer, packet = std::move(worldStatePacket)]() { sendPacket(playerPeer, *packet, false); });
+			        threadPool.run([this, playerPeer, packet = std::move(worldStatePacket)]() { sendPacket(playerPeer, *packet, false); });
 		        }
-	        });
+	        },
+	        "Broadcast World State");
 }
 
 // Check for timed out players
 void GameServer::checkTimeouts()
 {
-	threadManager.scheduleResourceTask({ GameResources::PlayersId },
+	threadPool.write<PlayerLock>("Check Timeouts",
 	        [this]()
 	        {
 		        uint32_t currentTime = Utils::getCurrentTimeMs();
@@ -2017,13 +2018,14 @@ void GameServer::checkTimeouts()
 				        ENetPeer* playerPeer = it->second.peer;
 
 				        // Schedule saving player data as a separate task
-				        threadManager.scheduleResourceTask({ GameResources::AuthId, GameResources::DatabaseId }, [this, username, lastPos]() { savePlayerData(username, lastPos); });
+				        auto resources = ThreadPool::resources<AuthLock, DatabaseLock>({ "Auth", "Database" });
+				        resources.write(threadPool, [this, username, lastPos]() { savePlayerData(username, lastPos); }, "Save player data");
 
 				        // Schedule broadcasting timeout message as a separate task
-				        threadManager.scheduleTask([this, username]() { broadcastSystemMessage(username + " timed out"); });
+				        threadPool.run([this, username]() { broadcastSystemMessage(username + " timed out"); });
 
 				        // Disconnect the player - do this in a separate task
-				        threadManager.scheduleTask([playerPeer]() { enet_peer_disconnect(playerPeer, 0); });
+				        threadPool.run([playerPeer]() { enet_peer_disconnect(playerPeer, 0); });
 
 				        // Remove from players map
 				        players.erase(it);
@@ -2036,7 +2038,7 @@ void GameServer::checkTimeouts()
 void GameServer::broadcastSystemMessage(const std::string& message)
 {
 	// Schedule as a read task since we're not modifying player data
-	threadManager.scheduleReadTask({ GameResources::PlayersId },
+	threadPool.write<PlayerLock>("Broadcast System Message",
 	        [this, message]()
 	        {
 		        logger.info("Broadcast: " + message);
@@ -2050,7 +2052,7 @@ void GameServer::broadcastSystemMessage(const std::string& message)
 		        }
 
 		        // Add to chat history (needs write access to Chat)
-		        threadManager.scheduleResourceTask({ GameResources::ChatId },
+		        threadPool.write<ChatLock>("Add to Chat History",
 		                [this, message]()
 		                {
 			                ChatMessage chatMsg;
@@ -2075,8 +2077,8 @@ void GameServer::broadcastSystemMessage(const std::string& message)
 std::vector<std::string> GameServer::getOnlinePlayerNames()
 {
 	// Schedule a read task and wait for the result
-	return threadManager
-	        .scheduleReadTaskWithResult({ GameResources::PlayersId },
+	return threadPool
+	        .write<PlayerLock>("Get Online Player Names",
 	                [this]() -> std::vector<std::string>
 	                {
 		                std::vector<std::string> names;
@@ -2096,7 +2098,8 @@ std::vector<std::string> GameServer::getOnlinePlayerNames()
 void GameServer::savePlayerData(const std::string& username, const Position& lastPos)
 {
 	// Schedule a resource task that requires Auth and Database resources
-	threadManager.scheduleResourceTask({ GameResources::AuthId, GameResources::DatabaseId },
+	auto resources = ThreadPool::resources<AuthLock, DatabaseLock>({ "Auth", "Database" });
+	resources.write(threadPool,
 	        [this, username, lastPos]()
 	        {
 		        // Update in-memory structure
@@ -2131,14 +2134,16 @@ void GameServer::savePlayerData(const std::string& username, const Position& las
 				        logger.error("Failed to save position data to database for player " + username);
 			        }
 		        }
-	        });
+	        },
+	        "Save Player Data");
 }
 
 // Load authentication data from file
 void GameServer::loadAuthData()
 {
 	// Use a resource task with exclusive access to Auth resources
-	threadManager.scheduleResourceTask({ GameResources::AuthId, GameResources::DatabaseId },
+	auto resources = ThreadPool::resources<AuthLock, DatabaseLock>({ "Auth", "Database" });
+	resources.write(threadPool,
 	        [this]()
 	        {
 		        logger.info("Loading player authentication data...");
@@ -2329,14 +2334,16 @@ void GameServer::loadAuthData()
 		        }
 
 		        file.close();
-	        });
+	        },
+	        "Load Auth Data");
 }
 
 // Save authentication data to file
 void GameServer::saveAuthData()
 {
 	// Schedule a resource task that requires Auth and Database resources
-	threadManager.scheduleResourceTask({ GameResources::AuthId, GameResources::DatabaseId },
+	auto resources = ThreadPool::resources<AuthLock, DatabaseLock>({ "Auth", "Database" });
+	resources.write(threadPool,
 	        [this]()
 	        {
 		        logger.debug("Saving player authentication data...");
@@ -2429,7 +2436,8 @@ void GameServer::saveAuthData()
 		        {
 			        logger.error("Error saving auth data to file: " + std::string(e.what()));
 		        }
-	        });
+	        },
+	        "Save Auth Data");
 }
 
 // Load server configuration
@@ -2675,7 +2683,8 @@ void GameServer::initializeCommandHandlers()
 			float z = std::stof(args[3]);
 
 			// Use a resource task to update the player's position safely
-			threadManager.scheduleResourceTask({ GameResources::PlayersId, GameResources::SpatialGridId },
+			auto resources = ThreadPool::resources<PlayerLock, SpatialGridLock>({ "Players", "SpatialGrid" });
+			resources.write(threadPool,
 			        [this, playerId = player.id, x, y, z, args]()
 			        {
 				        // Find the player in the map
@@ -2703,7 +2712,8 @@ void GameServer::initializeCommandHandlers()
 				        // Send confirmation message
 				        auto msgPacket = PacketManager::createSystemMessage("Teleported to X=" + args[1] + " Y=" + args[2] + " Z=" + args[3]);
 				        sendPacket(player.peer, *msgPacket, true);
-			        });
+			        },
+			        "Teleport Player");
 		}
 		catch (const std::exception& e)
 		{
@@ -2716,7 +2726,7 @@ void GameServer::initializeCommandHandlers()
 	commandHandlers["players"] = [this](const Player& player, const std::vector<std::string>& args)
 	{
 		// Use a read task to safely access the players map
-		threadManager.scheduleReadTask({ GameResources::PlayersId },
+		threadPool.read<PlayerLock>("List Players",
 		        [this, playerId = player.id]()
 		        {
 			        // First player might not exist anymore
@@ -2775,14 +2785,14 @@ void GameServer::initializeCommandHandlers()
 		}
 
 		// Broadcast action message - Schedule as a task
-		threadManager.scheduleTask(
+		threadPool.run(
 		        [this, playerName = player.name, action]()
 		        {
 			        // Create a chat message with a special "ACTION" sender to indicate this is an action
 			        auto packet = PacketManager::createChatMessage("ACTION", playerName + " " + action);
 
 			        // Schedule a resource task that requires Players resource
-			        threadManager.scheduleResourceTask({ GameResources::PlayersId },
+			        threadPool.write<PlayerLock>("Broadcast Action",
 			                [this, packet = std::move(packet)]()
 			                {
 				                // Collect all authenticated players' peers
@@ -2798,7 +2808,7 @@ void GameServer::initializeCommandHandlers()
 
 				                // Release resources before sending packets
 				                // Schedule a separate task for sending packets to avoid holding resources
-				                threadManager.scheduleTask(
+				                threadPool.run(
 				                        [this, authenticatedPeers, packet = std::move(packet)]()
 				                        {
 					                        for (ENetPeer* peer: authenticatedPeers)
@@ -2832,7 +2842,7 @@ void GameServer::initializeCommandHandlers()
 		}
 
 		// Use a read task to find the target player
-		threadManager.scheduleReadTask({ GameResources::PlayersId },
+		threadPool.read<PlayerLock>("Whisper",
 		        [this, senderPlayerId = player.id, targetName, message]()
 		        {
 			        // Find sender (who might not exist anymore)
@@ -2893,7 +2903,7 @@ void GameServer::initializeCommandHandlers()
 		std::string targetName = args[1];
 
 		// Schedule the kick operation
-		threadManager.scheduleTask(
+		threadPool.run(
 		        [this, targetName, adminName = player.name]()
 		        {
 			        kickPlayer(targetName, adminName);
@@ -2924,7 +2934,7 @@ void GameServer::initializeCommandHandlers()
 		std::string targetName = args[1];
 
 		// Schedule the ban operation
-		threadManager.scheduleTask(
+		threadPool.run(
 		        [this, targetName, adminName = player.name]()
 		        {
 			        banPlayer(targetName, adminName);
@@ -2962,14 +2972,14 @@ void GameServer::initializeCommandHandlers()
 		}
 
 		// Schedule the broadcast
-		threadManager.scheduleTask(
+		threadPool.run(
 		        [this, message, playerName = player.name]()
 		        {
 			        // Create system message for broadcast
 			        auto broadcastPacket = PacketManager::createSystemMessage("[Broadcast] " + message);
 
 			        // Schedule a resource task to get all players
-			        threadManager.scheduleResourceTask({ GameResources::PlayersId },
+			        threadPool.write<PlayerLock>("Broadcast",
 			                [this, packet = std::move(broadcastPacket)]()
 			                {
 				                // Collect all authenticated players' peers
@@ -2984,7 +2994,7 @@ void GameServer::initializeCommandHandlers()
 				                }
 
 				                // Release resources before sending packets
-				                threadManager.scheduleTask(
+				                threadPool.run(
 				                        [this, authenticatedPeers, packet = std::move(packet)]()
 				                        {
 					                        for (ENetPeer* peer: authenticatedPeers)
@@ -3018,16 +3028,10 @@ void GameServer::initializeCommandHandlers()
 		std::string targetName = args[1];
 
 		// Schedule the operation and get the result
-		bool success = threadManager
-		                       .scheduleResourceTaskWithResult<bool>({ GameResources::AuthId, GameResources::PlayersId },
-		                               [this, targetName]() -> bool
-		                               {
-			                               return setPlayerAdmin(targetName, true);
-			                               // Note: setPlayerAdmin has been refactored to work directly with resources
-		                               })
-		                       .get(); // Wait for the result
+		auto resources = ThreadPool::resources<AuthLock, PlayerLock>({ "Auth", "Players" });
+		auto success = resources.write(threadPool, [this, targetName]() { return setPlayerAdmin(targetName, true); }, "Set Admin Status");
 
-		if (success)
+		if (success.get()) // Wait for the result
 		{
 			auto packet = PacketManager::createSystemMessage("Admin status granted to " + targetName);
 			sendPacket(player.peer, *packet, true);
@@ -3059,7 +3063,8 @@ void GameServer::initializeCommandHandlers()
 		std::string targetName = args[1];
 
 		// Use a resource task to safely teleport
-		threadManager.scheduleResourceTask({ GameResources::PlayersId, GameResources::SpatialGridId },
+		auto resources = ThreadPool::resources<PlayerLock, SpatialGridLock>({ "Players", "SpatialGrid" });
+		resources.write(threadPool,
 		        [this, adminId = player.id, targetName]()
 		        {
 			        // Find the admin player
@@ -3068,7 +3073,6 @@ void GameServer::initializeCommandHandlers()
 			        {
 				        return; // Admin no longer exists
 			        }
-
 			        // Find target player
 			        Player* targetPlayer = nullptr;
 			        for (auto& pair: players)
@@ -3079,23 +3083,18 @@ void GameServer::initializeCommandHandlers()
 					        break;
 				        }
 			        }
-
 			        if (targetPlayer != nullptr)
 			        {
 				        Position oldPos = adminIt->second.position;
 				        Position newPos = targetPlayer->position;
-
 				        // Update admin's position
 				        adminIt->second.position = newPos;
 				        adminIt->second.lastValidPosition = newPos;
-
 				        // Update in spatial grid
 				        spatialGrid.updateEntity(adminId, oldPos, newPos);
-
 				        // Send teleport packet
 				        auto teleportPacket = PacketManager::createTeleport(newPos);
 				        sendPacket(adminIt->second.peer, *teleportPacket, true);
-
 				        // Send confirmation message
 				        auto msgPacket = PacketManager::createSystemMessage("Teleported to player: " + targetName);
 				        sendPacket(adminIt->second.peer, *msgPacket, true);
@@ -3105,7 +3104,8 @@ void GameServer::initializeCommandHandlers()
 				        auto packet = PacketManager::createSystemMessage("Player not found: " + targetName);
 				        sendPacket(adminIt->second.peer, *packet, true);
 			        }
-		        });
+		        },
+		        "Teleport to Player");
 	};
 }
 
@@ -3118,7 +3118,7 @@ bool GameServer::kickPlayer(const std::string& playerName, const std::string& ad
 	std::future<bool> resultFuture = resultPromise.get_future();
 
 	// Schedule the task without using scheduleResourceTaskWithResult
-	threadManager.scheduleResourceTask({ GameResources::PlayersId },
+	threadPool.write<PlayerLock>("Kick Player",
 	        [this, playerName, adminName, &resultPromise]()
 	        {
 		        bool playerFound = false;
@@ -3204,7 +3204,8 @@ bool GameServer::setPlayerAdmin(const std::string& playerName, bool isAdmin)
 void GameServer::printServerStatus()
 {
 	// Use scheduleReadTask instead of scheduleReadTaskWithResult since we don't need the return value
-	threadManager.scheduleReadTask({ GameResources::PlayersId, GameResources::AuthId },
+	auto resources = ThreadPool::resources<PlayerLock, AuthLock>({ "Players", "Auth" });
+	resources.read(threadPool,
 	        [this]()
 	        {
 		        // Count authenticated players
@@ -3232,16 +3233,17 @@ void GameServer::printServerStatus()
 		        logger.info("Network stats:");
 		        logger.info("  Packets: " + std::to_string(stats.totalPacketsSent) + " sent, " + std::to_string(stats.totalPacketsReceived) + " received");
 		        logger.info("  Data: " + Utils::formatBytes(stats.totalBytesSent) + " sent, " + Utils::formatBytes(stats.totalBytesReceived) + " received");
-		        logger.info("Thread Pool: " + std::to_string(threadManager.getThreadCount()) + " threads");
+		        logger.info("Thread Pool: " + threadPool.getStats());
 		        logger.info("=========================");
-	        });
+	        },
+	        "Print Server Status");
 }
 
 // Print player list to console
 void GameServer::printPlayerList()
 {
 	// Schedule a read task that requires Players resource
-	threadManager.scheduleReadTask({ GameResources::PlayersId },
+	threadPool.read<PlayerLock>("Print Player List",
 	        [this]()
 	        {
 		        logger.info("===== Online Players =====");

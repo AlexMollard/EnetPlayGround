@@ -30,7 +30,7 @@ public:
 	void setChatManager(std::shared_ptr<ChatManager> chatManager);
 	void setNetworkManager(std::shared_ptr<NetworkManager> networkManager);
 	void setConnectionManager(std::shared_ptr<ConnectionManager> connectionManager);
-	void setThreadManager(std::shared_ptr<ThreadManager> threadManager);
+	void setThreadManager(std::shared_ptr<ThreadPool> threadPool);
 
 	const char* getLoginUsernameBuffer();
 	void setLoginUsernameBuffer(const char* username);
@@ -46,7 +46,7 @@ private:
 	std::shared_ptr<ChatManager> chatManager;
 	std::shared_ptr<NetworkManager> networkManager;
 	std::shared_ptr<ConnectionManager> connectionManager;
-	std::shared_ptr<ThreadManager> threadManager;
+	std::shared_ptr<ThreadPool> threadPool;
 	
 	ThemeManager themeManager;
 

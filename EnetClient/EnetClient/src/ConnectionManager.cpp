@@ -1,8 +1,8 @@
 #include "ConnectionManager.h"
 
 #include "ChatManager.h"
-#include "UIManager.h"
 #include "GameClient.h"
+#include "UIManager.h"
 
 void ConnectionManager::startConnection(const std::string& username, const std::string& password, bool rememberCredentials)
 {
@@ -49,7 +49,7 @@ void ConnectionManager::startConnection(const std::string& username, const std::
 	// Define authentication failure handler
 	std::function<void(const std::string&)> handleAuthFailure = [this](const std::string& errorMsg)
 	{
-		threadManager->scheduleUITask(
+		threadPool->write<UILock>("Auth failure",
 		        [this, errorMsg]()
 		        {
 			        uiManager->setErrorMessage("Authentication failed: " + errorMsg);
@@ -59,13 +59,13 @@ void ConnectionManager::startConnection(const std::string& username, const std::
 	};
 
 	// Schedule the connection and authentication task
-	threadManager->scheduleNetworkTask(
+	threadPool->write<NetworkLock>("Start connection",
 	        [this, username, password, rememberCredentials, handleAuthSuccess, handleAuthFailure]()
 	        {
 		        // Connect to server
 		        if (!networkManager->connectToServer(networkManager->getServerAddress().c_str(), networkManager->getServerPort()))
 		        {
-			        threadManager->scheduleUITask(
+			        threadPool->write<UILock>("Connection failed",
 			                [this]()
 			                {
 				                uiManager->setErrorMessage("Failed to connect to server");
@@ -75,12 +75,12 @@ void ConnectionManager::startConnection(const std::string& username, const std::
 		        }
 
 		        // Update connection progress
-		        threadManager->scheduleUITask([this]() { connectionProgress = 0.5f; });
+		        threadPool->write<UILock>("Incrementing connection progress", [this]() { connectionProgress = 0.5f; });
 
 		        // Attempt authentication
 		        if (!authManager->authenticate(username, password, rememberCredentials, handleAuthSuccess, handleAuthFailure))
 		        {
-			        threadManager->scheduleUITask(
+			        threadPool->write<UILock>("Auth failed",
 			                [this]()
 			                {
 				                uiManager->setErrorMessage("Failed to start authentication");
@@ -90,7 +90,7 @@ void ConnectionManager::startConnection(const std::string& username, const std::
 		        }
 		        else
 		        {
-			        threadManager->scheduleUITask(
+			        threadPool->write<UILock>("Auth started",
 			                [this]()
 			                {
 				                GameClient::currentGameState = CurrentGameState::Authenticating;
@@ -206,7 +206,7 @@ void ConnectionManager::handlePacket(const ENetPacket* enetPacket)
 void ConnectionManager::updateNetwork()
 {
 	// Only process network updates if connected or connecting
-	if (GameClient::currentGameState == CurrentGameState::LoginScreen)
+	if (GameClient::currentGameState == CurrentGameState::LoginScreen || GameClient::currentGameState == CurrentGameState::RegisterScreen)
 	{
 		return;
 	}
@@ -317,9 +317,9 @@ void ConnectionManager::setNetworkManager(std::shared_ptr<NetworkManager> networ
 	this->networkManager = networkManager;
 }
 
-void ConnectionManager::setThreadManager(std::shared_ptr<ThreadManager> threadManager)
+void ConnectionManager::setThreadManager(std::shared_ptr<ThreadPool> threadPool)
 {
-	this->threadManager = threadManager;
+	this->threadPool = threadPool;
 }
 
 void ConnectionManager::handleAuthResponse(const GameProtocol::AuthResponsePacket& packet)

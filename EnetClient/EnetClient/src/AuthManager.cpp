@@ -7,15 +7,15 @@
 #include "NetworkManager.h"
 #include "PacketTypes.h"
 
-AuthManager::AuthManager(std::shared_ptr<NetworkManager> networkManager, std::shared_ptr<ThreadManager> threadManager)
-      : networkManager(networkManager), threadManager(threadManager)
+AuthManager::AuthManager(std::shared_ptr<NetworkManager> networkManager, std::shared_ptr<ThreadPool> threadPool)
+      : networkManager(networkManager), threadPool(threadPool)
 {
 	logger.debug("Initializing AuthManager");
 
 	// Create a thread manager if none provided
-	if (!threadManager)
+	if (!threadPool)
 	{
-		this->threadManager = std::make_shared<ThreadManager>();
+		this->threadPool = std::make_shared<ThreadPool>();
 	}
 }
 
@@ -35,8 +35,7 @@ bool AuthManager::authenticate(const std::string& username, const std::string& p
 		logger.error("Cannot authenticate: not connected to server");
 		if (authFailedCallback)
 		{
-			// Use thread manager instead of creating a new thread
-			threadManager->scheduleTask([failedCallback = authFailedCallback]() { failedCallback("Not connected to server"); });
+			authFailedCallback("Not connected to server");
 		}
 		return false;
 	}
@@ -47,9 +46,9 @@ bool AuthManager::authenticate(const std::string& username, const std::string& p
 		logger.error("Authentication failed: empty credentials");
 		if (authFailedCallback)
 		{
-			// Use thread manager instead of creating a new thread
-			threadManager->scheduleTask([failedCallback = authFailedCallback]() { failedCallback("Username or password cannot be empty"); });
+			authFailedCallback("Username or password cannot be empty");
 		}
+
 		return false;
 	}
 
@@ -69,7 +68,7 @@ bool AuthManager::authenticate(const std::string& username, const std::string& p
 		logger.error("Failed to get server peer for authentication");
 		if (authFailedCallback)
 		{
-			threadManager->scheduleTask([failedCallback = authFailedCallback]() { failedCallback("Connection to server lost"); });
+			authFailedCallback("Connection to server lost");
 		}
 		return false;
 	}
@@ -84,7 +83,7 @@ bool AuthManager::authenticate(const std::string& username, const std::string& p
 		std::string usernameCopy = username;
 		std::string passwordCopy = password;
 
-		threadManager->scheduleTask([this, usernameCopy, passwordCopy]() { this->saveCredentials(usernameCopy, passwordCopy); });
+		threadPool->write<UILock>("Saving credentials", [this, usernameCopy, passwordCopy]() { saveCredentials(usernameCopy, passwordCopy); });
 	}
 
 	return true;
@@ -112,7 +111,7 @@ void AuthManager::processAuthResponse(const void* packetData, size_t packetLengt
 		logger.error("Auth response packet too small");
 		if (failedCallback)
 		{
-			threadManager->scheduleTask([failedCallback]() { failedCallback("Received malformed authentication response"); });
+			failedCallback("Received malformed authentication response");
 		}
 		return;
 	}
@@ -125,7 +124,7 @@ void AuthManager::processAuthResponse(const void* packetData, size_t packetLengt
 		logger.error("Failed to deserialize auth response packet");
 		if (failedCallback)
 		{
-			threadManager->scheduleTask([failedCallback]() { failedCallback("Received malformed authentication response"); });
+			failedCallback("Received malformed authentication response");
 		}
 		return;
 	}
@@ -137,7 +136,7 @@ void AuthManager::processAuthResponse(const void* packetData, size_t packetLengt
 		logger.error("Failed to cast auth response packet");
 		if (failedCallback)
 		{
-			threadManager->scheduleTask([failedCallback]() { failedCallback("Received malformed authentication response"); });
+			failedCallback("Received malformed authentication response");
 		}
 		return;
 	}
@@ -152,8 +151,7 @@ void AuthManager::processAuthResponse(const void* packetData, size_t packetLengt
 
 		if (successCallback)
 		{
-			// Use thread manager
-			threadManager->scheduleTask([successCallback, pid = playerId]() { successCallback(pid); });
+			successCallback(playerId);
 		}
 	}
 	else
@@ -164,8 +162,7 @@ void AuthManager::processAuthResponse(const void* packetData, size_t packetLengt
 
 		if (failedCallback)
 		{
-			// Use thread manager
-			threadManager->scheduleTask([failedCallback, errorMsg = errorMessage]() { failedCallback(errorMsg); });
+			failedCallback(errorMessage);
 		}
 	}
 }

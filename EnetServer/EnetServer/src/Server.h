@@ -26,7 +26,7 @@
 #include "PluginManager.h"
 #include "SpatialGrid.h"
 #include "Structs.h"
-#include "ThreadManager.h"
+#include "ThreadPool.h"
 #include "PacketManager.h"
 
 // Command handler function type
@@ -85,28 +85,6 @@ struct PacketStats
 	std::atomic<uint32_t> totalBytesReceived{ 0 };
 };
 
-namespace GameResources
-{
-	// Helper to create resource IDs with the right type
-	template<typename T>
-	ResourceId create(const std::string& name)
-	{
-		return ThreadManager::createResourceId<T>(name);
-	}
-
-	// Main server resources
-	const ResourceId PlayersId = create<Player>("players");
-	const ResourceId AuthId = create<AuthData>("auth");
-	const ResourceId ChatId = create<ChatMessage>("chat");
-	const ResourceId NetworkId = create<ENetEvent>("network");
-	const ResourceId SpatialGridId = create<SpatialGrid>("spatialGrid");
-	const ResourceId PluginsId = create<PluginManager>("plugins");
-	const ResourceId ConfigId = create<ServerConfig>("config");
-	const ResourceId DatabaseId = create<DatabaseManager>("database");
-	const ResourceId PeerDataId = create<void*>("peerData");
-	const ResourceId PeerStatsId = create<PacketStats>("peerStats");
-}
-
 // Main game server class
 class GameServer
 {
@@ -134,7 +112,7 @@ public:
 
 	std::vector<std::string> getOnlinePlayerNames();
 
-	Logger logger;
+	Logger& logger = Logger::getInstance();
 
 private:
 	// Packet manager instance
@@ -146,7 +124,7 @@ private:
 	bool stopRequested = false;
 
 	// Thread Manager
-	ThreadManager threadManager;
+	ThreadPool threadPool;
 
 	// Periodic task handles - these will hold futures for repeating tasks
 	std::future<void> networkTaskFuture;

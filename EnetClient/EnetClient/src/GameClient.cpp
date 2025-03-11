@@ -14,11 +14,11 @@ GameClient::GameClient()
 
 	// Create the thread manager first
 	size_t numThreads = max(1u, 4);
-	threadManager = std::make_shared<ThreadManager>(numThreads);
+	threadPool = std::make_shared<ThreadPool>(numThreads, logger, true);
 
 	// Create managers without circular dependencies first
-	networkManager = std::make_shared<NetworkManager>(threadManager);
-	authManager = std::make_shared<AuthManager>(networkManager, threadManager);
+	networkManager = std::make_shared<NetworkManager>(threadPool);
+	authManager = std::make_shared<AuthManager>(networkManager, threadPool);
 	playerManager = std::make_shared<PlayerManager>();
 
 	// Create remaining managers with default constructors
@@ -34,14 +34,14 @@ GameClient::GameClient()
 	// Set up dependencies for ConnectionManager
 	connectionManager->setNetworkManager(networkManager);
 	connectionManager->setAuthManager(authManager);
-	connectionManager->setThreadManager(threadManager);
+	connectionManager->setThreadManager(threadPool);
 	connectionManager->setPlayerManager(playerManager);
 
 	// Set up dependencies for UIManager
 	uiManager->setPlayerManager(playerManager);
 	uiManager->setChatManager(chatManager);
 	uiManager->setNetworkManager(networkManager);
-	uiManager->setThreadManager(threadManager);
+	uiManager->setThreadManager(threadPool);
 
 	// Set up circular references
 	networkManager->setAuthManager(authManager);
@@ -55,7 +55,7 @@ GameClient::GameClient()
 	{
 		std::string loadedUsername, loadedPassword;
 		// Load credentials on thread pool and wait for result
-		auto future = threadManager->scheduleTaskWithResult([this, &loadedUsername, &loadedPassword]() { return authManager->loadCredentials(loadedUsername, loadedPassword); });
+		auto future = threadPool->read<FileLock>("Loading credentials",  [this, &loadedUsername, &loadedPassword]() { return authManager->loadCredentials(loadedUsername, loadedPassword); });
 
 		if (future.get()) // Wait for the result
 		{
@@ -89,10 +89,10 @@ GameClient::~GameClient()
 	authManager.reset();
 
 	// Wait for all tasks to complete before shutting down
-	if (threadManager)
+	if (threadPool)
 	{
-		threadManager->waitForTasks();
-		threadManager.reset();
+		threadPool->wait();
+		threadPool.reset();
 	}
 
 	logger.debug("Client shutdown complete");

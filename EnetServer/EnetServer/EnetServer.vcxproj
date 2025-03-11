@@ -91,9 +91,7 @@
     <ClInclude Include="..\..\EnetShared\IconsLucide.h" />
     <ClInclude Include="..\..\EnetShared\StackTrace.h" />
     <ClInclude Include="..\..\EnetShared\Logger.h" />
-    <ClInclude Include="..\..\EnetShared\ThreadManager.h" />
-    <ClInclude Include="..\..\EnetShared\ThreadPool\thread_pool.h" />
-    <ClInclude Include="..\..\EnetShared\ThreadPool\thread_safe_queue.h" />
+    <ClInclude Include="..\..\EnetShared\ThreadPool.h" />
     <ClInclude Include="..\..\EnetShared\Utils.h" />
     <ClInclude Include="..\..\EnetShared\PluginInterface.h" />
     <ClInclude Include="..\..\EnetShared\Structs.h" />

@@ -2,6 +2,65 @@
 #include <cmath>
 #include <set>
 
+// ====================================
+// Resource locks
+struct UILock
+{
+}; // UI thread resources
+
+struct ChatLock
+{
+}; // Chat thread resources
+
+
+struct NetworkLock
+{
+}; // Network resources
+
+struct DatabaseLock
+{
+}; // Database resources
+
+struct FileLock
+{
+}; // File system resources
+
+struct PlayerLock
+{
+}; // Player data resources
+
+struct PluginsLock
+{
+}; // Plugin resources
+
+struct PeerStatsLock
+{
+}; // Peer stats resources
+
+struct SpatialGridLock
+{
+}; // Spatial grid resources
+
+struct AuthLock
+{
+}; // Player authentication resources
+
+namespace GlobalResources
+{
+	const std::string UI_MAIN = "main";
+	const std::string CHAT = "main";
+	const std::string NETWORK = "main";
+	const std::string DATABASE = "main";
+	const std::string FILES = "main";
+	const std::string PLAYERS = "main";
+	const std::string PLUGINS = "main";
+	const std::string PEER_STATS = "main";
+	const std::string SPATIAL_GRID = "main";
+	const std::string AUTH = "main";
+} // namespace GlobalResources
+
+// ====================================
+
 struct Position
 {
 	float x = 0.0f;
@@ -45,6 +104,7 @@ struct AuthData
 
 // Player session data
 #include <enet/enet.h>
+
 struct Player
 {
 	uint32_t id;

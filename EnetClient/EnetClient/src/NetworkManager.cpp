@@ -65,105 +65,87 @@ void NetworkDiagnostics::reset()
 }
 
 // Constructor with enhanced initialization
-NetworkManager::NetworkManager(std::shared_ptr<ThreadManager> threadManager)
-      : bandwidthTokenBucket(0, 0), threadManager(threadManager)
+NetworkManager::NetworkManager(std::shared_ptr<ThreadPool> threadPool)
+      : bandwidthTokenBucket(0, 0), threadPool(threadPool)
 {
 	logger.debug("Initializing Enhanced NetworkManager");
 
 	// Create a thread manager if none provided
-	if (!threadManager)
+	if (!threadPool)
 	{
-		this->threadManager = std::make_shared<ThreadManager>();
+		this->threadPool = std::make_shared<ThreadPool>();
 	}
 
-	// Default packet type configuration
-	auto configureMessageTypes = [this]()
-	{
-		messageTypeConfigs["AUTH:"] = { MessageCategory::CRITICAL, PRIORITY_CRITICAL, false, 1.0f };
-		messageTypeConfigs["PING:"] = { MessageCategory::CRITICAL, PRIORITY_HIGH, false, 1.0f };
-		messageTypeConfigs["POSITION:"] = { MessageCategory::POSITION, PRIORITY_NORMAL, true, 0.3f };
-		messageTypeConfigs["MOVE_DELTA:"] = { MessageCategory::POSITION, PRIORITY_NORMAL, true, 0.3f };
-		messageTypeConfigs["CHAT:"] = { MessageCategory::CHAT, PRIORITY_NORMAL, true, 0.7f };
-		messageTypeConfigs["COMMAND:"] = { MessageCategory::GAMEPLAY, PRIORITY_HIGH, false, 0.9f };
-		messageTypeConfigs["TELEPORT:"] = { MessageCategory::GAMEPLAY, PRIORITY_CRITICAL, false, 1.0f };
-	};
+	messageTypeConfigs["AUTH:"] = { MessageCategory::CRITICAL, PRIORITY_CRITICAL, false, 1.0f };
+	messageTypeConfigs["PING:"] = { MessageCategory::CRITICAL, PRIORITY_HIGH, false, 1.0f };
+	messageTypeConfigs["POSITION:"] = { MessageCategory::POSITION, PRIORITY_NORMAL, true, 0.3f };
+	messageTypeConfigs["MOVE_DELTA:"] = { MessageCategory::POSITION, PRIORITY_NORMAL, true, 0.3f };
+	messageTypeConfigs["CHAT:"] = { MessageCategory::CHAT, PRIORITY_NORMAL, true, 0.7f };
+	messageTypeConfigs["COMMAND:"] = { MessageCategory::GAMEPLAY, PRIORITY_HIGH, false, 0.9f };
+	messageTypeConfigs["TELEPORT:"] = { MessageCategory::GAMEPLAY, PRIORITY_CRITICAL, false, 1.0f };
 
-	threadManager->scheduleResourceTask({ GameResources::configResourceId }, configureMessageTypes);
+	categoryTokenBuckets[MessageCategory::CRITICAL] = TokenBucket(50000, 100000); // 50 KB/s, 100 KB burst
+	categoryTokenBuckets[MessageCategory::GAMEPLAY] = TokenBucket(40000, 80000);  // 40 KB/s, 80 KB burst
+	categoryTokenBuckets[MessageCategory::POSITION] = TokenBucket(30000, 60000);  // 30 KB/s, 60 KB burst
+	categoryTokenBuckets[MessageCategory::CHAT] = TokenBucket(20000, 40000);      // 20 KB/s, 40 KB burst
+	categoryTokenBuckets[MessageCategory::TELEMETRY] = TokenBucket(5000, 10000);  // 5 KB/s, 10 KB burst
+	categoryTokenBuckets[MessageCategory::MISC] = TokenBucket(5000, 10000);       // 5 KB/s, 10 KB burst
 
-	// Default bandwidth allocation
-	auto configureBandwidth = [this]()
-	{
-		categoryTokenBuckets[MessageCategory::CRITICAL] = TokenBucket(50000, 100000); // 50 KB/s, 100 KB burst
-		categoryTokenBuckets[MessageCategory::GAMEPLAY] = TokenBucket(40000, 80000);  // 40 KB/s, 80 KB burst
-		categoryTokenBuckets[MessageCategory::POSITION] = TokenBucket(30000, 60000);  // 30 KB/s, 60 KB burst
-		categoryTokenBuckets[MessageCategory::CHAT] = TokenBucket(20000, 40000);      // 20 KB/s, 40 KB burst
-		categoryTokenBuckets[MessageCategory::TELEMETRY] = TokenBucket(5000, 10000);  // 5 KB/s, 10 KB burst
-		categoryTokenBuckets[MessageCategory::MISC] = TokenBucket(5000, 10000);       // 5 KB/s, 10 KB burst
-
-		// Global bandwidth limit (150 KB/s, 300 KB burst)
-		bandwidthTokenBucket = TokenBucket(150000, 300000);
-	};
-
-	threadManager->scheduleResourceTask({ GameResources::bandwidthResourceId }, configureBandwidth);
+	// Global bandwidth limit (150 KB/s, 300 KB burst)
+	bandwidthTokenBucket = TokenBucket(150000, 300000);
 }
 
 // Destructor with enhanced cleanup
 NetworkManager::~NetworkManager()
 {
 	disconnect(true);
+	threadPool->wait();
 
 	// Clean up ENet resources
-	threadManager->scheduleResourceTask({ GameResources::networkResourceId },
-	        [this]()
-	        {
-		        if (client != nullptr)
-		        {
-			        enet_host_destroy(client);
-			        client = nullptr;
-			        enet_deinitialize();
-		        }
+	if (client != nullptr)
+	{
+		enet_host_destroy(client);
+		client = nullptr;
+		enet_deinitialize();
+	}
 
-		        logger.debug("Enhanced NetworkManager destroyed");
-	        });
-
-	// Wait for all tasks to complete before destroying
-	threadManager->waitForTasks();
+	logger.debug("Enhanced NetworkManager destroyed");
 }
 
 bool NetworkManager::initialize()
 {
-	return threadManager
-	        ->scheduleResourceTaskWithResult<bool>({ GameResources::networkResourceId },
-	                [this]()
-	                {
-		                logger.debug("Initializing ENet");
+	auto success = threadPool->write<NetworkLock>("Init Network Manager",
+	        [this]()
+	        {
+		        logger.debug("Initializing ENet");
 
-		                // Initialize ENet
-		                if (enet_initialize() != 0)
-		                {
-			                logger.error("Failed to initialize ENet");
-			                return false;
-		                }
+		        // Initialize ENet
+		        if (enet_initialize() != 0)
+		        {
+			        logger.error("Failed to initialize ENet");
+			        return false;
+		        }
 
-		                // Create client host
-		                client = enet_host_create(nullptr, // Use nullptr instead of &address
-		                        1,                         // Allow 1 outgoing connection
-		                        4,                         // Use 4 channels to match server
-		                        0,                         // Unlimited incoming bandwidth
-		                        0                          // Unlimited outgoing bandwidth
-		                );
+		        // Create client host
+		        client = enet_host_create(nullptr, // Use nullptr instead of &address
+		                1,                         // Allow 1 outgoing connection
+		                4,                         // Use 4 channels to match server
+		                0,                         // Unlimited incoming bandwidth
+		                0                          // Unlimited outgoing bandwidth
+		        );
 
-		                if (client == nullptr)
-		                {
-			                logger.error("Failed to create ENet client host");
-			                enet_deinitialize();
-			                return false;
-		                }
+		        if (client == nullptr)
+		        {
+			        logger.error("Failed to create ENet client host");
+			        enet_deinitialize();
+			        return false;
+		        }
 
-		                logger.debug("NetworkManager initialized successfully");
-		                return true;
-	                })
-	        .get();
+		        logger.debug("NetworkManager initialized successfully");
+		        return true;
+	        });
+
+	return success.get();
 }
 
 std::string NetworkManager::getConnectionStateString() const
@@ -340,7 +322,7 @@ bool NetworkManager::connectToServer(const char* address, uint16_t port)
 	}
 
 	// Now we can process queued packets, but don't block here
-	threadManager->scheduleTask([this]() { processQueuedPackets(); });
+	threadPool->write<NetworkLock>("ProcessQueuedPackets", [this]() { processQueuedPackets(); });
 
 	connectionInProgress.store(false);
 	return true;
@@ -545,7 +527,7 @@ void NetworkManager::cleanExpiredPackets()
 {
 	uint64_t currentTime = getCurrentTimeMs();
 
-	threadManager->scheduleResourceTask({ GameResources::queueResourceId },
+	threadPool->write<NetworkLock>("CleanExpiredPackets",
 	        [this, currentTime]()
 	        {
 		        std::priority_queue<QueuedPacket> tempQueue;
@@ -677,7 +659,7 @@ void NetworkManager::sendPacket(std::shared_ptr<GameProtocol::Packet> packet, bo
 
 void NetworkManager::queuePacket(const std::string& data, bool reliable, uint8_t priority)
 {
-	threadManager->scheduleResourceTask({ GameResources::queueResourceId },
+	threadPool->write<NetworkLock>("QueuePacket",
 	        [this, data, reliable, priority]()
 	        {
 		        // Check if queue has room
@@ -701,8 +683,7 @@ void NetworkManager::queuePacket(const std::string& data, bool reliable, uint8_t
 void NetworkManager::sendPacketWithPriority(std::shared_ptr<GameProtocol::Packet> packet, bool reliable, uint8_t priority)
 {
 	// Check if we're connected for the fast path
-	bool currentlyConnected = threadManager->scheduleReadTaskWithResult({ GameResources::networkResourceId }, [this]() -> bool { return isConnected && connectionState == ConnectionState::CONNECTED; }).get();
-
+	bool currentlyConnected = isConnected && connectionState == ConnectionState::CONNECTED;
 	if (currentlyConnected)
 	{
 		// Send directly if connected
@@ -711,9 +692,7 @@ void NetworkManager::sendPacketWithPriority(std::shared_ptr<GameProtocol::Packet
 	}
 
 	// If we reach here, we're disconnected but may want to queue
-	bool shouldQueue = threadManager->scheduleReadTaskWithResult({ GameResources::configResourceId }, [this]() -> bool { return queuePacketsDuringDisconnection; }).get();
-
-	if (shouldQueue)
+	if (queuePacketsDuringDisconnection)
 	{
 		// Serialize the packet to binary data for queueing
 		std::vector<uint8_t> serializedData = packet->serialize();
@@ -723,7 +702,7 @@ void NetworkManager::sendPacketWithPriority(std::shared_ptr<GameProtocol::Packet
 		GameProtocol::PacketType packetType = packet->getType();
 		std::string packetTypeName = GameProtocol::getPacketTypeName(packetType);
 
-		threadManager->scheduleResourceTask({ GameResources::queueResourceId },
+		threadPool->write<NetworkLock>("QueuePacketWithPriority",
 		        [this, dataStr, reliable, priority, packetTypeName]()
 		        {
 			        // Check if queue has room
@@ -873,7 +852,6 @@ void NetworkManager::processQueuedPackets()
 				std::string message = packet.message.substr(5);
 
 				// Create and send chat message packet
-				// Note: For simplicity, we'll use "Queued" as the sender name
 				auto chatPacket = packetManager.createChatMessage("Queued", message);
 				packetManager.sendPacket(serverPeer, *chatPacket, true);
 			}
@@ -933,18 +911,13 @@ void NetworkManager::processQueuedPackets()
 	// Schedule processing of remaining packets if needed
 	if (remaining > 0)
 	{
-		threadManager->scheduleTask(
-		        [this]()
-		        {
-			        std::this_thread::sleep_for(std::chrono::milliseconds(50));
-			        processQueuedPackets();
-		        });
+		threadPool->write<NetworkLock>("ProcessQueuedPackets", [this]() { processQueuedPackets(); });
 	}
 }
 
 void NetworkManager::clearPacketQueue()
 {
-	threadManager->scheduleResourceTask({ GameResources::queueResourceId },
+	threadPool->write<NetworkLock>("ClearPacketQueue",
 	        [this]()
 	        {
 		        std::priority_queue<QueuedPacket> empty;
@@ -958,7 +931,7 @@ size_t NetworkManager::getQueuedPacketCount()
 	return outgoingQueue.size();
 }
 
-// The update method needs refactoring to use ThreadManager
+// The update method needs refactoring to use ThreadPool
 void NetworkManager::update(const std::function<void()>& updatePositionCallback, const std::function<void(const ENetPacket*)>& handlePacketCallback, const std::function<void()>& disconnectCallback)
 {
 	// Update bandwidth stats (no ENet operations)
@@ -1056,10 +1029,9 @@ void NetworkManager::update(const std::function<void()>& updatePositionCallback,
 								{
 									try
 									{
-										// Schedule in thread pool to avoid blocking
 										// create a copy of the packet before passing it to the callback as the packet could be destroyed before the callback is executed
 										ENetPacket* packetCopy = enet_packet_create(event.packet->data, event.packet->dataLength, event.packet->flags);
-										threadManager->scheduleNetworkTask([callback = handlePacketCallback, packet = packetCopy]() { callback(packet); });
+										threadPool->write<NetworkLock>("Recieved packet success callback", [callback = handlePacketCallback, packet = packetCopy]() { callback(packet); });
 									}
 									catch (std::exception& e)
 									{
@@ -1076,10 +1048,9 @@ void NetworkManager::update(const std::function<void()>& updatePositionCallback,
 						{
 							try
 							{
-								// Schedule in thread pool to avoid blocking
 								// create a copy of the packet before passing it to the callback as the packet could be destroyed before the callback is executed
 								ENetPacket* packetCopy = enet_packet_create(event.packet->data, event.packet->dataLength, event.packet->flags);
-								threadManager->scheduleNetworkTask([callback = handlePacketCallback, packet = packetCopy]() { callback(packet); });
+								threadPool->write<NetworkLock>("Unrecognized Recieved packet success callback", [callback = handlePacketCallback, packet = packetCopy]() { callback(packet); });
 							}
 							catch (std::exception& e)
 							{
@@ -1098,7 +1069,7 @@ void NetworkManager::update(const std::function<void()>& updatePositionCallback,
 					// Schedule disconnect callback
 					if (disconnectCallback)
 					{
-						threadManager->scheduleTask(disconnectCallback);
+						threadPool->write<NetworkLock>("Enet Disconnection callback", disconnectCallback);
 					}
 
 					// Update connection state
@@ -1151,7 +1122,7 @@ void NetworkManager::update(const std::function<void()>& updatePositionCallback,
 
 		if (shouldUpdatePosition)
 		{
-			threadManager->scheduleTask(updatePositionCallback);
+			threadPool->write<PlayerLock>("Updating player position", updatePositionCallback);
 		}
 	}
 
@@ -1175,7 +1146,7 @@ void NetworkManager::sendHeartbeat()
 {
 	uint64_t currentTime = getCurrentTimeMs();
 
-	threadManager->scheduleResourceTask({ GameResources::networkResourceId }, [this, currentTime]() { lastHeartbeatSent = currentTime; });
+	threadPool->write<NetworkLock>("Updating last heartbeat time", [this, currentTime]() { lastHeartbeatSent = currentTime; });
 
 	// Get server peer
 	ENetPeer* serverPeer = getServerPeer();
@@ -1192,8 +1163,7 @@ void NetworkManager::sendHeartbeat()
 void NetworkManager::sendPing()
 {
 	// First check if we're connected
-	bool currentlyConnected = threadManager->scheduleReadTaskWithResult({ GameResources::networkResourceId }, [this]() { return isConnected && connectionState == ConnectionState::CONNECTED; }).get();
-
+	bool currentlyConnected = isConnected && connectionState == ConnectionState::CONNECTED;
 	if (!currentlyConnected)
 		return;
 
@@ -1202,8 +1172,8 @@ void NetworkManager::sendPing()
 	bool shouldLogTimeout = false;
 	uint32_t currentPingSequence = 0;
 
-	// Use ThreadManager to check and update ping-related state
-	threadManager->scheduleResourceTask({ GameResources::networkResourceId },
+	// Use ThreadPool to check and update ping-related state
+	threadPool->write<NetworkLock>("SendPing",
 	        [this, currentTime, &shouldSendPing, &shouldLogTimeout, &currentPingSequence]()
 	        {
 		        // Check if it's time to send a ping
@@ -1292,8 +1262,7 @@ void NetworkManager::sendPing()
 void NetworkManager::checkConnectionHealth()
 {
 	// First check if conditions allow for checking connection health
-	bool shouldCheckHealth = threadManager->scheduleReadTaskWithResult({ GameResources::networkResourceId }, [this]() { return isConnected && connectionState == ConnectionState::CONNECTED && !reconnecting; }).get();
-
+	bool shouldCheckHealth = isConnected && connectionState == ConnectionState::CONNECTED && !reconnecting;
 	if (!shouldCheckHealth)
 	{
 		return;
@@ -1303,7 +1272,7 @@ void NetworkManager::checkConnectionHealth()
 	bool shouldDisconnect = false;
 
 	// Check connection health - requires resource access
-	threadManager->scheduleResourceTask({ GameResources::networkResourceId },
+	threadPool->write<NetworkLock>("CheckConnectionHealth",
 	        [this, currentTime, &shouldDisconnect]()
 	        {
 		        // Check if we've received any responses from server recently
@@ -1348,7 +1317,7 @@ void NetworkManager::updateBandwidthStats()
 	uint64_t currentTime = getCurrentTimeMs();
 
 	// Update bandwidth statistics - requires bandwidth resource access
-	threadManager->scheduleResourceTask({ GameResources::bandwidthResourceId },
+	threadPool->write<NetworkLock>("UpdateBandwidthStats",
 	        [this, currentTime]()
 	        {
 		        // Check if we've moved to a new second
@@ -1471,49 +1440,10 @@ MessageTypeConfig NetworkManager::getMessageConfig(const std::string& message)
 	return defaultConfig;
 }
 
-// Configure a message type
-void NetworkManager::configureMessageType(const std::string& prefix, uint8_t priority, bool canThrottle, float throttleMultiplier)
-{
-	threadManager->scheduleResourceTask({ GameResources::configResourceId },
-	        [this, prefix, priority, canThrottle, throttleMultiplier]()
-	        {
-		        // Determine message category based on prefix
-		        MessageCategory category;
-		        if (prefix == "AUTH:" || prefix == "PING:" || prefix == "PONG:" || prefix == "HEARTBEAT")
-		        {
-			        category = MessageCategory::CRITICAL;
-		        }
-		        else if (prefix == "POSITION:" || prefix == "MOVE_DELTA:")
-		        {
-			        category = MessageCategory::POSITION;
-		        }
-		        else if (prefix == "CHAT:")
-		        {
-			        category = MessageCategory::CHAT;
-		        }
-		        else if (prefix == "TELEMETRY:")
-		        {
-			        category = MessageCategory::TELEMETRY;
-		        }
-		        else if (prefix == "COMMAND:" || prefix == "ACTION:" || prefix == "COMBAT:")
-		        {
-			        category = MessageCategory::GAMEPLAY;
-		        }
-		        else
-		        {
-			        category = MessageCategory::MISC;
-		        }
-
-		        messageTypeConfigs[prefix] = { category, priority, canThrottle, throttleMultiplier };
-
-		        logger.debug("Configured message type: prefix=\"" + prefix + "\", category=" + std::to_string(static_cast<int>(category)) + ", priority=" + std::to_string(priority) + ", canThrottle=" + (canThrottle ? "true" : "false") + ", throttleMultiplier=" + std::to_string(throttleMultiplier));
-	        });
-}
-
 // Configure bandwidth management
 void NetworkManager::configureBandwidthManagement(size_t outgoingLimitBps, size_t throttledLimitBps, bool enableThrottling)
 {
-	threadManager->scheduleResourceTask({ GameResources::bandwidthResourceId },
+	threadPool->write<NetworkLock>("ConfigureBandwidthManagement",
 	        [this, outgoingLimitBps, throttledLimitBps, enableThrottling]()
 	        {
 		        outgoingBandwidthLimit = outgoingLimitBps;
@@ -1545,7 +1475,7 @@ void NetworkManager::configureBandwidthManagement(size_t outgoingLimitBps, size_
 // Configure adaptive timeout
 void NetworkManager::configureAdaptiveTimeout(uint32_t initial, uint32_t max, uint32_t pingFailures)
 {
-	threadManager->scheduleResourceTask({ GameResources::networkResourceId },
+	threadPool->write<NetworkLock>("ConfigureAdaptiveTimeout",
 	        [this, initial, max, pingFailures]()
 	        {
 		        initialServerResponseTimeout = initial;
@@ -1560,7 +1490,7 @@ void NetworkManager::configureAdaptiveTimeout(uint32_t initial, uint32_t max, ui
 // Configure packet queueing
 void NetworkManager::setPacketQueueing(bool enabled, size_t maxSize, uint32_t maxAgeMs)
 {
-	threadManager->scheduleResourceTask({ GameResources::queueResourceId, GameResources::configResourceId },
+	threadPool->write<NetworkLock>("ConfigurePacketQueueing",
 	        [this, enabled, maxSize, maxAgeMs]()
 	        {
 		        queuePacketsDuringDisconnection = enabled;
@@ -1574,7 +1504,7 @@ void NetworkManager::setPacketQueueing(bool enabled, size_t maxSize, uint32_t ma
 // Configure message compression
 void NetworkManager::configureCompression(bool enabled, uint32_t minSize, float minRatio)
 {
-	threadManager->scheduleResourceTask({ GameResources::configResourceId },
+	threadPool->write<NetworkLock>("ConfigureCompression",
 	        [this, enabled, minSize, minRatio]()
 	        {
 		        compressionEnabled = enabled;
@@ -1588,7 +1518,7 @@ void NetworkManager::configureCompression(bool enabled, uint32_t minSize, float 
 // Compress a message
 std::string NetworkManager::compressMessage(const std::string& message, float* ratio)
 {
-	// This method doesn't need ThreadManager as it doesn't access shared state
+	// This method doesn't need ThreadPool as it doesn't access shared state
 	// It processes the input string and returns a result
 
 	if (message.empty())
@@ -1672,7 +1602,7 @@ std::string NetworkManager::compressMessage(const std::string& message, float* r
 // Decompress a message
 std::string NetworkManager::decompressMessage(const std::string& compressedData)
 {
-	// Like compressMessage, this method doesn't need ThreadManager
+	// Like compressMessage, this method doesn't need ThreadPool
 	// as it processes an input string and returns a result without accessing shared state
 
 	if (compressedData.empty())
@@ -1711,7 +1641,7 @@ std::string NetworkManager::decompressMessage(const std::string& compressedData)
 // Update ping statistics
 void NetworkManager::updatePingStatistics(uint32_t pingTime)
 {
-	threadManager->scheduleResourceTask({ GameResources::networkResourceId },
+	threadPool->write<NetworkLock>("UpdatePingStatistics",
 	        [this, pingTime]()
 	        {
 		        // Update ping history
@@ -1821,216 +1751,11 @@ bool NetworkManager::processReceivedPacket(const void* packetData, size_t packet
 	return false;
 }
 
-// Analyze connection quality
-std::string NetworkManager::analyzeConnectionQuality()
-{
-	return threadManager
-	        ->scheduleReadTaskWithResult({ GameResources::networkResourceId, GameResources::bandwidthResourceId },
-	                [this]()
-	                {
-		                std::stringstream analysis;
-		                analysis << "=== MMO CLIENT NETWORK ANALYSIS ===\n\n";
-
-		                // Ping quality analysis
-		                if (diagnostics.avgPingMs < 50)
-		                {
-			                analysis << "Excellent latency (" << diagnostics.avgPingMs << "ms)\n";
-		                }
-		                else if (diagnostics.avgPingMs < 100)
-		                {
-			                analysis << "Good latency (" << diagnostics.avgPingMs << "ms)\n";
-		                }
-		                else if (diagnostics.avgPingMs < 150)
-		                {
-			                analysis << "Moderate latency (" << diagnostics.avgPingMs << "ms)\n";
-		                }
-		                else
-		                {
-			                analysis << "Poor latency (" << diagnostics.avgPingMs << "ms)\n";
-		                }
-
-		                // Jitter analysis
-		                if (diagnostics.pingStdDeviation < 10)
-		                {
-			                analysis << "Excellent stability (jitter: " << diagnostics.pingStdDeviation << "ms)\n";
-		                }
-		                else if (diagnostics.pingStdDeviation < 25)
-		                {
-			                analysis << "Good stability (jitter: " << diagnostics.pingStdDeviation << "ms)\n";
-		                }
-		                else if (diagnostics.pingStdDeviation < 50)
-		                {
-			                analysis << "Moderate stability (jitter: " << diagnostics.pingStdDeviation << "ms)\n";
-		                }
-		                else
-		                {
-			                analysis << "Poor stability (jitter: " << diagnostics.pingStdDeviation << "ms)\n";
-		                }
-
-		                // Packet loss analysis
-		                if (diagnostics.packetLossPercentage < 1)
-		                {
-			                analysis << "Excellent reliability (packet loss: " << diagnostics.packetLossPercentage << "%)\n";
-		                }
-		                else if (diagnostics.packetLossPercentage < 3)
-		                {
-			                analysis << "Good reliability (packet loss: " << diagnostics.packetLossPercentage << "%)\n";
-		                }
-		                else if (diagnostics.packetLossPercentage < 8)
-		                {
-			                analysis << "Moderate reliability (packet loss: " << diagnostics.packetLossPercentage << "%)\n";
-		                }
-		                else
-		                {
-			                analysis << "Poor reliability (packet loss: " << diagnostics.packetLossPercentage << "%)\n";
-		                }
-
-		                // Connection stability analysis
-		                if (diagnostics.disconnectionCount == 0)
-		                {
-			                analysis << "Perfect connection stability (no disconnections)\n";
-		                }
-		                else if (diagnostics.disconnectionCount <= 2)
-		                {
-			                analysis << "Good connection stability (" << diagnostics.disconnectionCount << " disconnections)\n";
-		                }
-		                else if (diagnostics.disconnectionCount <= 5)
-		                {
-			                analysis << "Moderate connection stability (" << diagnostics.disconnectionCount << " disconnections)\n";
-		                }
-		                else
-		                {
-			                analysis << "Poor connection stability (" << diagnostics.disconnectionCount << " disconnections)\n";
-		                }
-
-		                // Bandwidth usage analysis
-		                float bandwidthUsagePercent = 0;
-		                if (outgoingBandwidthLimit > 0)
-		                {
-			                bandwidthUsagePercent = (static_cast<float>(bandwidthStats.averageSendRateBps) * 100.0f) / static_cast<float>(outgoingBandwidthLimit);
-
-			                if (bandwidthUsagePercent < 50)
-			                {
-				                analysis << "Good bandwidth usage (" << bandwidthUsagePercent << "% of limit)\n";
-			                }
-			                else if (bandwidthUsagePercent < 80)
-			                {
-				                analysis << "Moderate bandwidth usage (" << bandwidthUsagePercent << "% of limit)\n";
-			                }
-			                else
-			                {
-				                analysis << "High bandwidth usage (" << bandwidthUsagePercent << "% of limit)\n";
-			                }
-		                }
-
-		                // MMO-specific analysis
-		                if (diagnostics.zoneTransitionCount > 0)
-		                {
-			                analysis << "\n--- MMO-Specific Metrics ---\n";
-			                analysis << "Zone Transitions: " << diagnostics.zoneTransitionCount << "\n";
-			                analysis << "Average Zone Loading Time: " << diagnostics.avgZoneLoadingTimeMs << "ms\n";
-
-			                if (diagnostics.combatPacketSuccessRate >= 99)
-			                {
-				                analysis << "Excellent combat performance (" << diagnostics.combatPacketSuccessRate << "% success)\n";
-			                }
-			                else if (diagnostics.combatPacketSuccessRate >= 95)
-			                {
-				                analysis << "Good combat performance (" << diagnostics.combatPacketSuccessRate << "% success)\n";
-			                }
-			                else if (diagnostics.combatPacketSuccessRate >= 90)
-			                {
-				                analysis << "Moderate combat performance (" << diagnostics.combatPacketSuccessRate << "% success)\n";
-			                }
-			                else
-			                {
-				                analysis << "Poor combat performance (" << diagnostics.combatPacketSuccessRate << "% success)\n";
-			                }
-		                }
-
-		                // Overall recommendation
-		                analysis << "\n=== OVERALL ASSESSMENT ===\n";
-
-		                int issues = 0;
-		                if (diagnostics.avgPingMs >= 150)
-			                issues++;
-		                if (diagnostics.pingStdDeviation >= 50)
-			                issues++;
-		                if (diagnostics.packetLossPercentage >= 8)
-			                issues++;
-		                if (diagnostics.disconnectionCount > 5)
-			                issues++;
-		                if (bandwidthUsagePercent >= 80)
-			                issues++;
-		                if (diagnostics.combatPacketSuccessRate < 90)
-			                issues++;
-
-		                if (issues == 0)
-		                {
-			                analysis << "EXCELLENT - Your connection is performing optimally for MMO gameplay.\n";
-		                }
-		                else if (issues == 1)
-		                {
-			                analysis << "GOOD - Your connection is performing well with minor issues.\n";
-		                }
-		                else if (issues == 2)
-		                {
-			                analysis << "FAIR - Your connection has some issues that could impact MMO experience.\n";
-		                }
-		                else
-		                {
-			                analysis << "POOR - Your connection has multiple significant issues for MMO gameplay.\n";
-		                }
-
-		                // Recommendations
-		                analysis << "\n=== RECOMMENDATIONS ===\n";
-
-		                if (diagnostics.avgPingMs >= 150)
-		                {
-			                analysis << "- Consider using a wired connection instead of WiFi\n";
-			                analysis << "- Choose a server closer to your geographical location\n";
-		                }
-
-		                if (diagnostics.pingStdDeviation >= 50)
-		                {
-			                analysis << "- Check for background applications using your bandwidth\n";
-			                analysis << "- Try restarting your router\n";
-		                }
-
-		                if (diagnostics.packetLossPercentage >= 8)
-		                {
-			                analysis << "- Check your network hardware for issues\n";
-			                analysis << "- Contact your ISP if issues persist\n";
-		                }
-
-		                if (diagnostics.disconnectionCount > 5)
-		                {
-			                analysis << "- Check for WiFi interference or signal strength issues\n";
-			                analysis << "- Verify your firewall settings\n";
-		                }
-
-		                if (bandwidthUsagePercent >= 80)
-		                {
-			                analysis << "- Reduce position update frequency in game settings\n";
-			                analysis << "- Close other applications using your network\n";
-		                }
-
-		                if (diagnostics.combatPacketSuccessRate < 90)
-		                {
-			                analysis << "- Prioritize combat packets in your network settings\n";
-			                analysis << "- Consider lowering graphics settings to free up CPU/bandwidth\n";
-		                }
-
-		                return analysis.str();
-	                })
-	        .get();
-}
-
 // Generate a diagnostics report
 std::string NetworkManager::generateDiagnosticsReport()
 {
-	return threadManager
-	        ->scheduleReadTaskWithResult({ GameResources::networkResourceId, GameResources::bandwidthResourceId, GameResources::queueResourceId },
+	return threadPool
+	        ->write<NetworkLock>("GenerateDiagnosticsReport",
 	                [this]()
 	                {
 		                std::stringstream report;
@@ -2147,121 +1872,18 @@ std::string NetworkManager::generateDiagnosticsReport()
 	        .get();
 }
 
-// Prepare for zone transition
-void NetworkManager::prepareForZoneTransition()
-{
-	// This requires both network and queue resources
-	threadManager->scheduleResourceTask({ GameResources::networkResourceId, GameResources::queueResourceId },
-	        [this]()
-	        {
-		        // Mark that we're in zone transition
-		        inZoneTransition = true;
-		        zoneTransitionStartTime = getCurrentTimeMs();
-
-		        // Update diagnostics
-		        diagnostics.zoneTransitionCount++;
-
-		        // Temporarily increase timeouts during zone loading
-		        uint32_t originalTimeout = serverResponseTimeout;
-		        serverResponseTimeout = 30000; // 30 seconds for zone transition
-
-		        // Keep only critical packets in the queue
-		        std::priority_queue<QueuedPacket> tempQueue;
-
-		        while (!outgoingQueue.empty())
-		        {
-			        QueuedPacket packet = outgoingQueue.top();
-			        outgoingQueue.pop();
-
-			        if (packet.priority <= PRIORITY_HIGH)
-			        { // Keep only high and critical priority packets
-				        tempQueue.push(packet);
-			        }
-		        }
-
-		        outgoingQueue = std::move(tempQueue);
-
-		        logger.info("Prepared for zone transition - increased timeout to 30s, kept " + std::to_string(outgoingQueue.size()) + " critical packets");
-
-		        // Schedule timeout reset after zone transition using ThreadManager
-		        threadManager->scheduleTask(
-		                [this, originalTimeout]()
-		                {
-			                std::this_thread::sleep_for(std::chrono::seconds(30));
-
-			                threadManager->scheduleResourceTask({ GameResources::networkResourceId },
-			                        [this, originalTimeout]()
-			                        {
-				                        // Record zone loading time
-				                        uint64_t zoneLoadTime = getCurrentTimeMs() - zoneTransitionStartTime;
-
-				                        // Update average (weighted)
-				                        if (diagnostics.avgZoneLoadingTimeMs == 0)
-				                        {
-					                        diagnostics.avgZoneLoadingTimeMs = zoneLoadTime;
-				                        }
-				                        else
-				                        {
-					                        diagnostics.avgZoneLoadingTimeMs = (diagnostics.avgZoneLoadingTimeMs * (diagnostics.zoneTransitionCount - 1) + zoneLoadTime) / diagnostics.zoneTransitionCount;
-				                        }
-
-				                        inZoneTransition = false;
-				                        serverResponseTimeout = originalTimeout;
-				                        logger.info("Zone transition complete - restored timeout to " + std::to_string(originalTimeout) + "ms");
-			                        });
-		                });
-	        });
-}
-
-// Adapt to high population density
-void NetworkManager::adaptToHighPopulationDensity(bool highDensity)
-{
-	threadManager->scheduleResourceTask({ GameResources::networkResourceId },
-	        [this, highDensity]()
-	        {
-		        if (highDensity != highPopulationDensity)
-		        {
-			        highPopulationDensity = highDensity;
-
-			        if (highDensity)
-			        {
-				        // Reduce position update frequency in crowded areas
-				        positionUpdateInterval = 200; // 200ms between updates (5 per second)
-
-				        // Reduce position precision
-				        positionPrecision = 1; // 1 decimal place precision
-
-				        // Record for diagnostics
-				        diagnostics.highDensityAreaCount++;
-				        diagnostics.highDensityPositionUpdatesPerSecond = 1000.0f / positionUpdateInterval;
-
-				        logger.info("Adapting to high population density - reduced update frequency and precision");
-			        }
-			        else
-			        {
-				        // Normal settings for low-population areas
-				        positionUpdateInterval = 100; // 100ms (10 updates per second)
-				        positionPrecision = 2;        // 2 decimal places
-
-				        logger.info("Reverting to normal population density settings");
-			        }
-		        }
-	        });
-}
-
 // Set priority mode
 void NetworkManager::setPriorityMode(PriorityMode mode)
 {
 	// First check if the mode is already set
-	bool shouldUpdate = threadManager->scheduleReadTaskWithResult({ GameResources::networkResourceId }, [this, mode]() { return mode != currentPriorityMode; }).get();
-
+	bool shouldUpdate = mode != currentPriorityMode;
 	if (!shouldUpdate)
 	{
 		return;
 	}
 
 	// Update priority mode
-	threadManager->scheduleResourceTask({ GameResources::networkResourceId, GameResources::bandwidthResourceId },
+	threadPool->write<NetworkLock>("SetPriorityMode",
 	        [this, mode]()
 	        {
 		        currentPriorityMode = mode;
@@ -2324,15 +1946,14 @@ void NetworkManager::setPriorityMode(PriorityMode mode)
 void NetworkManager::setServerRequestedThrottling(int throttleLevel)
 {
 	// First check if the throttle level is already set
-	bool shouldUpdate = threadManager->scheduleReadTaskWithResult({ GameResources::networkResourceId }, [this, throttleLevel]() { return throttleLevel != serverThrottleLevel; }).get();
-
+	bool shouldUpdate = throttleLevel != serverThrottleLevel;
 	if (!shouldUpdate)
 	{
 		return;
 	}
 
 	// Update throttling
-	threadManager->scheduleResourceTask({ GameResources::networkResourceId, GameResources::bandwidthResourceId },
+	threadPool->write<NetworkLock>("SetServerRequestedThrottling",
 	        [this, throttleLevel]()
 	        {
 		        serverThrottleLevel = throttleLevel;
@@ -2370,7 +1991,7 @@ void NetworkManager::setServerRequestedThrottling(int throttleLevel)
 // Reset stats
 void NetworkManager::resetStats()
 {
-	threadManager->scheduleResourceTask({ GameResources::networkResourceId, GameResources::bandwidthResourceId },
+	threadPool->write<NetworkLock>("ResetStats",
 	        [this]()
 	        {
 		        // Reset network statistics

@@ -1,7 +1,7 @@
 #include "DatabaseManager.h"
 
-DatabaseManager::DatabaseManager(Logger& loggerRef)
-      : connection(nullptr), host("localhost"), user("gameserver"), password(""), database("gameserver"), port(3306), connected(false), logger(loggerRef)
+DatabaseManager::DatabaseManager()
+      : connection(nullptr), host("localhost"), user("gameserver"), password(""), database("gameserver"), port(3306), connected(false)
 {
 }
 

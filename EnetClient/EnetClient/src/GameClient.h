@@ -50,5 +50,5 @@ private:
 	HANDLE consoleHandle;
 
 	// Thread management
-	std::shared_ptr<ThreadManager> threadManager;
+	std::shared_ptr<ThreadPool> threadPool;
 };

@@ -15,7 +15,7 @@
 #include "Constants.h"
 #include "Logger.h"
 #include "PacketManager.h"
-#include "ThreadManager.h"
+#include "ThreadPool.h"
 
 // Advanced diagnostics
 struct NetworkDiagnostics
@@ -114,26 +114,6 @@ struct MessageTypeConfig
 	float throttleMultiplier;
 };
 
-namespace GameResources
-{
-	// Helper to create resource IDs with the right type
-	template<typename T>
-	ResourceId create(const std::string& name)
-	{
-		return ThreadManager::createResourceId<T>(name);
-	}
-
-	// This is basically a struct to control task execution
-	struct NetworkState
-	{
-	};
-
-	const ResourceId networkResourceId = create<NetworkState>("NetworkState");
-	const ResourceId queueResourceId = create<QueuedPacket>("PacketQueue");
-	const ResourceId bandwidthResourceId = create<BandwidthStats>("BandwidthStats");
-	const ResourceId configResourceId = create<MessageTypeConfig>("MessageConfig");
-} // namespace GameResources
-
 /**
  * NetworkManager - Handles ENet networking for MMO environments
  */
@@ -146,7 +126,7 @@ public:
 	static constexpr uint8_t PRIORITY_NORMAL = 128;
 	static constexpr uint8_t PRIORITY_LOW = 192;
 
-	NetworkManager(std::shared_ptr<ThreadManager> threadManager = nullptr);
+	NetworkManager(std::shared_ptr<ThreadPool> threadPool = nullptr);
 	~NetworkManager();
 
 	bool initialize();
@@ -169,34 +149,29 @@ public:
 	// Configuration
 	void setServerResponseTimeout(uint32_t timeoutMs)
 	{
-		threadManager->scheduleResourceTask({ GameResources::networkResourceId }, [this, timeoutMs]() { serverResponseTimeout = timeoutMs; });
+		threadPool->write<NetworkLock>("Server Response Time", [this, timeoutMs]() { serverResponseTimeout = timeoutMs; });
 	}
 
 	void setConnectionCheckInterval(uint32_t intervalMs)
 	{
-		threadManager->scheduleResourceTask({ GameResources::configResourceId }, [this, intervalMs]() { connectionCheckInterval = intervalMs; });
+		threadPool->write<NetworkLock>("Set Connection Interval", [this, intervalMs]() { connectionCheckInterval = intervalMs; });
 	}
 
 	void configureAdaptiveTimeout(uint32_t initial, uint32_t max, uint32_t pingFailures);
 	void configureBandwidthManagement(size_t outgoingLimitBps, size_t throttledLimitBps, bool enableThrottling);
 	void setPacketQueueing(bool enabled, size_t maxSize = 1000, uint32_t maxAgeMs = 30000);
-	void configureMessageType(const std::string& prefix, uint8_t priority, bool canThrottle, float throttleMultiplier);
 
 	void setReconnectAttempts(uint32_t attempts)
 	{
-		threadManager->scheduleResourceTask({ GameResources::configResourceId }, [this, attempts]() { reconnectAttempts = attempts; });
+		threadPool->write<NetworkLock>("Setting reconnection attempts", [this, attempts]() { reconnectAttempts = attempts; });
 	}
 
 	void setHeartbeatInterval(uint32_t intervalMs)
 	{
-		threadManager->scheduleResourceTask({ GameResources::configResourceId }, [this, intervalMs]() { heartbeatIntervalMs = intervalMs; });
+		threadPool->write<NetworkLock>("Setting Heart Beat intervals", [this, intervalMs]() { heartbeatIntervalMs = intervalMs; });
 	}
 
 	void configureCompression(bool enabled, uint32_t minSize = 100, float minRatio = 0.8f);
-
-	// MMO-specific features
-	void prepareForZoneTransition();
-	void adaptToHighPopulationDensity(bool highDensity);
 
 	// Priority modes
 	enum class PriorityMode
@@ -213,7 +188,6 @@ public:
 	void clearPacketQueue();
 
 	// Diagnostics
-	std::string analyzeConnectionQuality();
 	std::string generateDiagnosticsReport();
 	void resetStats();
 
@@ -284,17 +258,17 @@ public:
 	// Setters
 	void setServerAddress(const std::string& address)
 	{
-		threadManager->scheduleResourceTask({ GameResources::networkResourceId }, [this, address]() { serverAddress = address; });
+		threadPool->write<NetworkLock>("Setting Server Address", [this, address]() { serverAddress = address; });
 	}
 
 	void setServerPort(uint16_t port)
 	{
-		threadManager->scheduleResourceTask({ GameResources::networkResourceId }, [this, port]() { serverPort = port; });
+		threadPool->write<NetworkLock>("Setting port", [this, port]() { serverPort = port; });
 	}
 
 	void setConnected(bool connected)
 	{
-		threadManager->scheduleResourceTask({ GameResources::networkResourceId }, [this, connected]() { isConnected = connected; });
+		threadPool->write<NetworkLock>("Setting isConmnected", [this, connected]() { isConnected = connected; });
 	}
 
 	// Set the auth manager
@@ -464,7 +438,7 @@ private:
 
 	NetworkDiagnostics diagnostics;
 
-	std::shared_ptr<ThreadManager> threadManager;
+	std::shared_ptr<ThreadPool> threadPool;
 
 	// Dependencies
 	Logger& logger = Logger::getInstance();
