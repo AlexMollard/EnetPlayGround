@@ -47,7 +47,6 @@ The primary focus of this sandbox is to test various networking approaches, unde
         <li>🔄 Connection stability management</li>
         <li>⏱️ Game state synchronization</li>
         <li>📝 Comprehensive logging system</li>
-        <li>⚙️ Configurable network parameters</li>
         <li>🖼️ Graphical user interface</li>
         <li>🗺️ Position visualization</li>
         <li>🖌️ Theming system</li>
@@ -83,7 +82,6 @@ The primary focus of this sandbox is to test various networking approaches, unde
 - **🌐 ENet**: Reliable UDP networking library for client-server communication
 - **🖌️ Hello ImGui**: Cross-platform GUI library for interface development
 - **🗃️ MySQL Connector**: Database connectivity for persistent storage
-- **🔧 Thread-Pool**: A modern, fast, lightweight thread pool library based on C++20
 
 ### 🛠️ Development Tools
 - **📦 vcpkg**: C++ package manager for dependency management
@@ -93,8 +91,7 @@ The primary focus of this sandbox is to test various networking approaches, unde
 
 ### 📋 Prerequisites
 - Visual Studio 2022 (or newer)
-- C++17 compatible compiler
-- CMake 3.20+
+- C++23 compatible compiler
 - vcpkg
 - Git
 
@@ -123,6 +120,8 @@ The primary focus of this sandbox is to test various networking approaches, unde
    ```bash
    .\vcpkg install enet
    .\vcpkg install hello-imgui
+   .\vcpkg install hello-imgui[glfw-binding] # You need a window manager binding
+   .\vcpkg install hello-imgui[opengl3-binding] # You need a graphics binding
    .\vcpkg install libmysql
    .\vcpkg install nlohmann-json
    ```
@@ -188,8 +187,6 @@ EnetPlayGround serves as a platform for investigating various networking challen
 - 📏 Message size optimization
 - ⏱️ Latency impact assessment
 - 💻 Hardware requirements analysis
-- 🌊 Network flood resistance
-- 🛡️ Client isolation implementation
 - 🔒 Security impact on performance
 
 ## ❓ Frequently Asked Questions
@@ -223,8 +220,9 @@ I have only tested with 5 local clients and 2 remote clients, but im unsure of t
 ---
 
 <div align="center">
-  <p><sub>💻 Developed with a focus on networking performance and reliability</sub></p>
   <img src="http://estruyf-github.azurewebsites.net/api/VisitorHit?user=alexmollard&repo=EnetPlayGround&countColorcountColor&countColor=%237B1E7B" alt="Visitor Count" />
   <br>
   <img src="https://media1.tenor.com/m/aGA-AhVPXS0AAAAd/gato-enojado-insano-waza.gif" alt="cat" width="200px">
+  <br>
+  <a href="https://www.alexmollard.dev/"><img src="https://img.shields.io/badge/Created%20by-Alex%20Mollard-blue?style=for-the-badge&logo=github" alt="Created by Alex Mollard"></a>
 </div>
