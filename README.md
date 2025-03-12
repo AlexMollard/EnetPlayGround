@@ -117,14 +117,7 @@ The primary focus of this sandbox is to test various networking approaches, unde
    - Alternatively, set VCPKG_ROOT environment variable to your vcpkg installation path
 
 3. **📦 Install required dependencies**
-   ```bash
-   .\vcpkg install enet
-   .\vcpkg install hello-imgui
-   .\vcpkg install hello-imgui[glfw-binding] # You need a window manager binding
-   .\vcpkg install hello-imgui[opengl3-binding] # You need a graphics binding
-   .\vcpkg install libmysql
-   .\vcpkg install nlohmann-json
-   ```
+   - The projects now use vcpkg manifest files to manage dependencies so when you build the projects it will automatically install the required dependencies.
 
 4. **🔨 Build the projects**
    - Open `EnetServer/EnetServer.sln` for the server component
