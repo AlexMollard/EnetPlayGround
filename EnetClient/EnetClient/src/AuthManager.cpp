@@ -171,7 +171,7 @@ void AuthManager::saveCredentials(const std::string& username, const std::string
 {
 	logger.debug("Saving credentials...");
 
-	std::ofstream file(CREDENTIALS_FILE, std::ios::binary);
+	std::ofstream file(Constants::Files::CREDENTIALS_FILE, std::ios::binary);
 	if (!file.is_open())
 	{
 		logger.error("Failed to save credentials: couldn't open file");
@@ -204,7 +204,7 @@ bool AuthManager::loadCredentials(std::string& username, std::string& password)
 {
 	logger.debug("Loading saved credentials...");
 
-	std::ifstream file(CREDENTIALS_FILE, std::ios::binary);
+	std::ifstream file(Constants::Files::CREDENTIALS_FILE, std::ios::binary);
 	if (!file.is_open())
 	{
 		logger.debug("No saved credentials found");

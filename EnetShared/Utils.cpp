@@ -30,7 +30,7 @@ std::vector<std::string> Utils::splitString(const std::string& str, char delimit
 // Hash password (simple implementation - I want to upgrade this to bcrypt)
 std::string Utils::hashPassword(const std::string& password, const std::string& salt)
 {
-	if (!SECURE_PASSWORD_STORAGE)
+	if (!Constants::Security::SECURE_PASSWORD_STORAGE)
 	{
 		return password; // No hashing in development mode
 	}

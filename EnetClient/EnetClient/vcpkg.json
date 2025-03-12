@@ -1,0 +1,17 @@
+{
+  "name": "enet-client",
+  "version-string": "0.1.0",
+  "description": "Enet client application",
+  "dependencies": [
+    "enet",
+    "glfw3",
+    "vulkan",
+    "vk-bootstrap",
+    {
+      "name": "imgui",
+      "features": ["glfw-binding", "vulkan-binding", "docking-experimental"]
+    },
+    "nlohmann-json",
+    "vulkan-memory-allocator"
+  ]
+}

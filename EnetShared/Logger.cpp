@@ -62,7 +62,7 @@ std::string ErrorContext::toString() const
 }
 
 Logger::Logger()
-      : logFilePath(DEBUG_LOG_FILE)
+      : logFilePath(Constants::Files::DEBUG_LOG_FILE)
 {
 	// Store main thread ID
 #ifdef _WIN32

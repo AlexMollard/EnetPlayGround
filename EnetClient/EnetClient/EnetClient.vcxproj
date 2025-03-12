@@ -43,6 +43,9 @@
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Label="Vcpkg">
+    <VcpkgEnableManifest>true</VcpkgEnableManifest>
+  </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
@@ -88,11 +91,12 @@
     <ClCompile Include="src\MarkdownHelper.cpp" />
     <ClCompile Include="src\AuthManager.cpp" />
     <ClCompile Include="src\NetworkManager.cpp" />
-    <ClCompile Include="src\EnetClient.cpp" />
+    <ClCompile Include="src\main.cpp" />
     <ClCompile Include="src\GameClient.cpp" />
     <ClCompile Include="src\PlayerManager.cpp" />
     <ClCompile Include="src\ThemeManager.cpp" />
     <ClCompile Include="src\UIManager.cpp" />
+    <ClCompile Include="src\VulkanResourceHandler.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\EnetShared\PacketHeader.h" />
@@ -114,6 +118,8 @@
     <ClInclude Include="src\PlayerManager.h" />
     <ClInclude Include="src\ThemeManager.h" />
     <ClInclude Include="src\UIManager.h" />
+    <ClInclude Include="src\vk_mem_alloc.h" />
+    <ClInclude Include="src\VulkanResourceHandler.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

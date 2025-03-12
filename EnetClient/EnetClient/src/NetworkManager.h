@@ -338,8 +338,8 @@ private:
 	std::atomic<bool> isConnected{ false };
 	std::atomic<bool> reconnecting{ false };
 	ConnectionState connectionState = ConnectionState::DISCONNECTED;
-	std::string serverAddress = DEFAULT_SERVER;
-	uint16_t serverPort = DEFAULT_PORT;
+	std::string serverAddress = Constants::Network::DEFAULT_SERVER;
+	uint16_t serverPort = Constants::Network::DEFAULT_PORT;
 	PriorityMode currentPriorityMode = PriorityMode::NORMAL;
 	int serverThrottleLevel = 0;
 

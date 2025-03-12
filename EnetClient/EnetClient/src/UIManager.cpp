@@ -1,7 +1,7 @@
 #include "UIManager.h"
 
 #include "GameClient.h"
-#include "hello_imgui/hello_imgui.h"
+#include "imgui.h"
 #include "IconsLucide.h"
 #include "MarkdownHelper.h"
 #include "Utils.h"
@@ -24,7 +24,7 @@ void UIManager::drawUI()
 
 	// Disable rounding for full window
 	ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
-	ImGui::Begin(GAME_NAME, nullptr, window_flags);
+	ImGui::Begin(Constants::UI::GAME_NAME, nullptr, window_flags);
 	ImGui::PopStyleVar();
 
 	ImGui::Begin("Thread Statistics", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
@@ -72,9 +72,9 @@ void UIManager::drawLoginScreen()
 	ImGui::PushFont(ImGui::GetIO().Fonts->Fonts[0]); // Default font
 
 	// Center the title text
-	ImVec2 titleSize = ImGui::CalcTextSize(GAME_NAME);
+	ImVec2 titleSize = ImGui::CalcTextSize(Constants::UI::GAME_NAME);
 	ImGui::SetCursorPosX((contentWidth - titleSize.x) * 0.5f);
-	ImGui::Text(GAME_NAME);
+	ImGui::Text(Constants::UI::GAME_NAME);
 	ImGui::PopFont();
 
 	// Center version text
@@ -397,8 +397,8 @@ void UIManager::drawHeader()
 	// Left side - Title and version
 	ImGui::PushFont(ImGui::GetIO().Fonts->Fonts[1]); // Larger font
 	ImGui::SetCursorPosY(15);
-	ImGui::SetCursorPosX((ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize(GAME_NAME).x) * 0.5f);
-	ImGui::TextColored(themeManager.getCurrentTheme().textAccent, GAME_NAME);
+	ImGui::SetCursorPosX((ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize(Constants::UI::GAME_NAME).x) * 0.5f);
+	ImGui::TextColored(themeManager.getCurrentTheme().textAccent, Constants::UI::GAME_NAME);
 
 	// Player name centered in the header
 	auto myPlayerName = playerManager->getMyPlayer().name;

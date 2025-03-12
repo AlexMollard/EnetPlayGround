@@ -34,7 +34,7 @@ BreakBeforeBinaryOperators: NonAssignment
 BreakBeforeBraces: Custom
 BreakConstructorInitializers: BeforeColon
 BreakConstructorInitializersBeforeComma: false
-ColumnLimit: 350
+ColumnLimit: 175
 ConstructorInitializerAllOnOneLineOrOnePerLine: true
 ConstructorInitializerIndentWidth: 6
 ContinuationIndentWidth: 8

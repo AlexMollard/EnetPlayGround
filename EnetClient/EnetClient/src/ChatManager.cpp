@@ -18,7 +18,7 @@ void ChatManager::addChatMessage(const std::string& sender, const std::string& c
 	chatMessages.push_back(msg);
 
 	// Keep only the last N messages
-	while (chatMessages.size() > MESSAGE_HISTORY_SIZE)
+	while (chatMessages.size() > Constants::UI::MESSAGE_HISTORY_SIZE)
 	{
 		chatMessages.pop_front();
 	}

@@ -1,0 +1,10 @@
+{
+  "name": "enet-server",
+  "version-string": "0.1.0",
+  "description": "Enet server",
+  "dependencies": [
+    "enet",
+    "nlohmann-json",
+    "libmysql"
+  ]
+}
