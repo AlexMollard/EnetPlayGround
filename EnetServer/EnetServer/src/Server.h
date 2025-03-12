@@ -9,6 +9,7 @@
 #include <deque>
 #include <enet/enet.h>
 #include <functional>
+#include <future>
 #include <memory>
 #include <mutex>
 #include <set>
@@ -17,17 +18,16 @@
 #include <unordered_map>
 #include <vadefs.h>
 #include <vector>
-#include <future>
 
 // Configuration
 #include "Constants.h"
 #include "DatabaseManager.h"
 #include "Logger.h"
+#include "PacketManager.h"
 #include "PluginManager.h"
 #include "SpatialGrid.h"
 #include "Structs.h"
 #include "ThreadPool.h"
-#include "PacketManager.h"
 
 // Command handler function type
 using CommandHandler = std::function<void(const Player&, const std::vector<std::string>&)>;
@@ -54,28 +54,28 @@ struct ServerStats
 // Config options
 struct ServerConfig
 {
-	uint16_t port = DEFAULT_PORT;
-	size_t maxPlayers = MAX_PLAYERS;
-	uint32_t broadcastRateMs = BROADCAST_RATE_MS;
-	uint32_t timeoutMs = PLAYER_TIMEOUT_MS;
-	uint32_t saveIntervalMs = SAVE_INTERVAL_MS;
-	bool enableMovementValidation = MOVEMENT_VALIDATION;
-	float maxMovementSpeed = MAX_MOVEMENT_SPEED;
-	float interestRadius = INTEREST_RADIUS;
-	std::string adminPassword = ADMIN_PASSWORD;
+	uint16_t port = Constants::Server::DEFAULT_PORT;
+	size_t maxPlayers = Constants::Server::MAX_PLAYERS;
+	uint32_t broadcastRateMs = Constants::Server::BROADCAST_RATE_MS;
+	uint32_t timeoutMs = Constants::Server::PLAYER_TIMEOUT_MS;
+	uint32_t saveIntervalMs = Constants::Server::SAVE_INTERVAL_MS;
+	bool enableMovementValidation = Constants::Security::MOVEMENT_VALIDATION;
+	float maxMovementSpeed = Constants::Player::MAX_MOVEMENT_SPEED;
+	float interestRadius = Constants::Player::INTEREST_RADIUS;
+	std::string adminPassword = Constants::Server::ADMIN_PASSWORD;
 	bool logToConsole = true;
 	bool logToFile = true;
 	int logLevel = 1; // 0=errors only, 1=normal, 2=debug
 	bool enableChat = true;
-	Position spawnPosition = { DEFAULT_SPAWN_X, DEFAULT_SPAWN_Y, DEFAULT_SPAWN_Z };
+	Position spawnPosition = { Constants::Player::Spawn::DEFAULT_X, Constants::Player::Spawn::DEFAULT_Y, Constants::Player::Spawn::DEFAULT_Z };
 
 	// Database configuration
-	std::string dbHost = DB_HOST;
-	std::string dbUser = DB_USER;
-	std::string dbPassword = DB_PASSWORD;
-	std::string dbName = DB_NAME;
-	int dbPort = DB_PORT;
-	bool useDatabase = USE_DATABASE;
+	std::string dbHost = Constants::Database::HOST;
+	std::string dbUser = Constants::Database::USER;
+	std::string dbPassword = Constants::Database::PASSWORD;
+	std::string dbName = Constants::Database::NAME;
+	int dbPort = Constants::Database::PORT;
+	bool useDatabase = Constants::Database::USE_DATABASE;
 };
 
 // Packet stats
@@ -189,12 +189,12 @@ private:
 	void handlePingMessage(const Player& player, const std::string& pingData);
 	void handleCommandMessage(const Player& player, const std::string& commandStr);
 
-    void sendPacket(ENetPeer* peer, const GameProtocol::Packet& packet, bool reliable);
-    void sendSystemMessage(const Player& player, const std::string& message);
-    void sendAuthResponse(ENetPeer* peer, bool success, const std::string& message, uint32_t playerId = 0);
-    void sendTeleport(const Player& player, const Position& position);
-    void broadcastChatMessage(const std::string& sender, const std::string& message);
-    void broadcastWorldState();
+	void sendPacket(ENetPeer* peer, const GameProtocol::Packet& packet, bool reliable);
+	void sendSystemMessage(const Player& player, const std::string& message);
+	void sendAuthResponse(ENetPeer* peer, bool success, const std::string& message, uint32_t playerId = 0);
+	void sendTeleport(const Player& player, const Position& position);
+	void broadcastChatMessage(const std::string& sender, const std::string& message);
+	void broadcastWorldState();
 	void handlePacket(const Player& player, std::unique_ptr<GameProtocol::Packet> packet);
 
 	void handlePositionUpdate(uint32_t playerId, const Position& newPos);

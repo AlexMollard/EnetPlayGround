@@ -504,7 +504,7 @@ void PluginManager::dispatchPlayerDisconnect(Player& player)
 	}
 }
 
-void PluginManager::dispatchPlayerMessage(Player& player, const std::string& message)
+void PluginManager::dispatchPlayerMessage(Player& player, const GameProtocol::Packet& packet)
 {
 	auto pluginInstances = getPluginInstancesCopy();
 
@@ -512,7 +512,7 @@ void PluginManager::dispatchPlayerMessage(Player& player, const std::string& mes
 	{
 		try
 		{
-			plugin->onPlayerMessage(player, message);
+			plugin->onPlayerMessage(player, packet);
 		}
 		catch (const std::exception& e)
 		{

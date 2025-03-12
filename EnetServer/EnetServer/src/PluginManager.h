@@ -115,7 +115,7 @@ public:
 	void dispatchPlayerConnect(Player& player);
 	void dispatchPlayerLogin(Player& player);
 	void dispatchPlayerDisconnect(Player& player);
-	void dispatchPlayerMessage(Player& player, const std::string& message);
+	void dispatchPlayerMessage(Player& player, const GameProtocol::Packet& packet);
 	void dispatchPlayerMove(Player& player, const Position& oldPos, const Position& newPos);
 	void dispatchServerTick();
 	bool dispatchPlayerCommand(const Player& player, const std::string& command, const std::vector<std::string>& args);

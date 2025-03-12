@@ -1,8 +1,10 @@
 #pragma once
+#include <functional>
+#include <Logger.h>
 #include <string>
 #include <vector>
-#include <Logger.h>
-#include <functional>
+
+#include "PacketHeader.h"
 #include "Structs.h"
 
 // Define export/import macros
@@ -54,7 +56,7 @@ public:
 	{
 	}
 
-	virtual void onPlayerMessage(Player& player, const std::string& message)
+	virtual void onPlayerMessage(Player& player, const GameProtocol::Packet& packet)
 	{
 	}
 

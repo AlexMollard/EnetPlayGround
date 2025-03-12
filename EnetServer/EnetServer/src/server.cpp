@@ -311,17 +311,15 @@ void GameServer::start()
 
 	isRunning = true;
 	stopRequested = false;
-	logger.info("Server starting...");
+
+	// Wait for all threads to be done so we know that everything is set up
+	threadPool.wait();
+	logger.info("\n\nServer started successfully!\nClients can now join.\nType 'help' for available commands.\n");
 
 	// Schedule all recurring tasks
 	scheduleRecurringTask([this]() { networkTaskFunc(); }, 1, networkTaskFuture, "Network");
 	scheduleRecurringTask([this]() { updateTaskFunc(); }, config.broadcastRateMs, updateTaskFuture, "Update");
 	scheduleRecurringTask([this]() { saveTaskFunc(); }, config.saveIntervalMs, saveTaskFuture, "Save");
-
-	logger.info("Server started successfully");
-
-	// Broadcast system message
-	broadcastSystemMessage("Server started. Welcome to the game!");
 }
 
 // Shutdown server
@@ -407,8 +405,6 @@ void GameServer::shutdown()
 void GameServer::run()
 {
 	start();
-
-	logger.info("Server started successfully. Type 'help' for available commands.");
 
 	// Main thread handles console commands
 	std::string command;
@@ -841,6 +837,7 @@ void GameServer::handleClientMessage(const ENetEvent& event)
 
 		        // Send plugin event (you might need to adapt this for binary packets)
 		        // For now, we'll skip this or implement a string-based representation
+		        pluginManager->dispatchPlayerMessage(*player, *packetPtr);
 
 		        // Handle the packet based on its type
 		        handlePacket(*player, std::move(packetPtr));
@@ -1130,7 +1127,7 @@ void GameServer::handleAuthMessage(const std::string& authDataStr, ENetPeer* pee
 		        std::string password = parts[1];
 
 		        // Check if too many failed attempts
-		        if (player.failedAuthAttempts >= MAX_PASSWORD_ATTEMPTS)
+		        if (player.failedAuthAttempts >= Constants::Server::MAX_PASSWORD_ATTEMPTS)
 		        {
 			        sendAuthResponse(peer, false, "Too many failed attempts. Please reconnect.");
 			        logger.error("Too many auth attempts from " + player.ipAddress);
@@ -1729,7 +1726,7 @@ void GameServer::handleChatMessage(const Player& player, const std::string& mess
 		        chatHistory.push_back(chatMsg);
 
 		        // Limit chat history size
-		        while (chatHistory.size() > MAX_CHAT_HISTORY)
+		        while (chatHistory.size() > Constants::Server::MAX_CHAT_HISTORY)
 		        {
 			        chatHistory.pop_front();
 		        }
@@ -2066,7 +2063,7 @@ void GameServer::broadcastSystemMessage(const std::string& message)
 			                chatHistory.push_back(chatMsg);
 
 			                // Limit chat history size
-			                while (chatHistory.size() > MAX_CHAT_HISTORY)
+			                while (chatHistory.size() > Constants::Server::MAX_CHAT_HISTORY)
 			                {
 				                chatHistory.pop_front();
 			                }
@@ -2163,7 +2160,7 @@ void GameServer::loadAuthData()
 		        }
 
 		        // Original file-based loading code (as fallback)
-		        std::ifstream file(AUTH_DB_FILE, std::ios::binary);
+		        std::ifstream file(Constants::Files::AUTH_DB_FILE, std::ios::binary);
 		        if (!file.is_open())
 		        {
 			        logger.info("No existing auth file found, starting fresh");
@@ -2324,7 +2321,7 @@ void GameServer::loadAuthData()
 					        logger.info("Updated nextPlayerId to " + std::to_string(nextPlayerId));
 				        }
 
-				        logger.info("Successfully loaded " + std::to_string(authenticatedPlayers.size()) + " player accounts from " + AUTH_DB_FILE);
+				        logger.info("Successfully loaded " + std::to_string(authenticatedPlayers.size()) + " player accounts from " + Constants::Files::AUTH_DB_FILE);
 			        }
 		        }
 		        catch (const std::exception& e)
@@ -2365,11 +2362,13 @@ void GameServer::saveAuthData()
 
 		        // Original file-based saving code (as fallback)
 		        // Create backup of existing file
-		        if (std::filesystem::exists(AUTH_DB_FILE))
+		        if (std::filesystem::exists(Constants::Files::AUTH_DB_FILE))
 		        {
 			        try
 			        {
-				        std::filesystem::copy_file(AUTH_DB_FILE, std::string(AUTH_DB_FILE) + std::string(".bak"), std::filesystem::copy_options::overwrite_existing);
+				        std::filesystem::copy_file(Constants::Files::AUTH_DB_FILE,
+				                std::string(Constants::Files::AUTH_DB_FILE) + std::string(".bak"),
+				                std::filesystem::copy_options::overwrite_existing);
 			        }
 			        catch (const std::exception& e)
 			        {
@@ -2377,7 +2376,7 @@ void GameServer::saveAuthData()
 			        }
 		        }
 
-		        std::ofstream file(AUTH_DB_FILE, std::ios::binary);
+		        std::ofstream file(Constants::Files::AUTH_DB_FILE, std::ios::binary);
 		        if (!file.is_open())
 		        {
 			        logger.error("Error: Could not open auth file for writing");
@@ -2445,7 +2444,7 @@ void GameServer::loadConfig()
 {
 	logger.info("Loading server configuration...");
 
-	std::ifstream file(CONFIG_FILE);
+	std::ifstream file(Constants::Files::CONFIG_FILE);
 	if (!file.is_open())
 	{
 		logger.info("No config file found, using defaults");
@@ -2587,7 +2586,7 @@ void GameServer::createDefaultConfig()
 {
 	logger.info("Creating default configuration file...");
 
-	std::ofstream file(CONFIG_FILE);
+	std::ofstream file(Constants::Files::CONFIG_FILE);
 	if (!file.is_open())
 	{
 		logger.error("Failed to create default config file");
@@ -2595,31 +2594,31 @@ void GameServer::createDefaultConfig()
 	}
 
 	file << "# Server Configuration\n";
-	file << "port=" << DEFAULT_PORT << "\n";
-	file << "max_players=" << MAX_PLAYERS << "\n";
-	file << "broadcast_rate_ms=" << BROADCAST_RATE_MS << "\n";
-	file << "timeout_ms=" << PLAYER_TIMEOUT_MS << "\n";
-	file << "save_interval_ms=" << SAVE_INTERVAL_MS << "\n";
-	file << "enable_movement_validation=" << (MOVEMENT_VALIDATION ? "true" : "false") << "\n";
-	file << "max_movement_speed=" << MAX_MOVEMENT_SPEED << "\n";
-	file << "interest_radius=" << INTEREST_RADIUS << "\n";
-	file << "admin_password=" << ADMIN_PASSWORD << "\n";
+	file << "port=" << Constants::Server::DEFAULT_PORT << "\n";
+	file << "max_players=" << Constants::Server::MAX_PLAYERS << "\n";
+	file << "broadcast_rate_ms=" << Constants::Server::BROADCAST_RATE_MS << "\n";
+	file << "timeout_ms=" << Constants::Server::PLAYER_TIMEOUT_MS << "\n";
+	file << "save_interval_ms=" << Constants::Server::SAVE_INTERVAL_MS << "\n";
+	file << "enable_movement_validation=" << (Constants::Security::MOVEMENT_VALIDATION ? "true" : "false") << "\n";
+	file << "max_movement_speed=" << Constants::Player::MAX_MOVEMENT_SPEED << "\n";
+	file << "interest_radius=" << Constants::Player::INTEREST_RADIUS << "\n";
+	file << "admin_password=" << Constants::Server::ADMIN_PASSWORD << "\n";
 	file << "log_to_console=true\n";
 	file << "log_to_file=true\n";
 	file << "log_level=1\n";
 	file << "enable_chat=true\n";
-	file << "spawn_position_x=" << DEFAULT_SPAWN_X << "\n";
-	file << "spawn_position_y=" << DEFAULT_SPAWN_Y << "\n";
-	file << "spawn_position_z=" << DEFAULT_SPAWN_Z << "\n";
+	file << "spawn_position_x=" << Constants::Player::Spawn::DEFAULT_X << "\n";
+	file << "spawn_position_y=" << Constants::Player::Spawn::DEFAULT_Y << "\n";
+	file << "spawn_position_z=" << Constants::Player::Spawn::DEFAULT_Z << "\n";
 
 	// Database configuration
 	file << "\n# Database Configuration\n";
-	file << "use_database=" << (USE_DATABASE ? "true" : "false") << "\n";
-	file << "db_host=" << DB_HOST << "\n";
-	file << "db_user=" << DB_USER << "\n";
-	file << "db_password=" << DB_PASSWORD << "\n";
-	file << "db_name=" << DB_NAME << "\n";
-	file << "db_port=" << DB_PORT << "\n";
+	file << "use_database=" << (Constants::Database::USE_DATABASE ? "true" : "false") << "\n";
+	file << "db_host=" << Constants::Database::HOST << "\n";
+	file << "db_user=" << Constants::Database::USER << "\n";
+	file << "db_password=" << Constants::Database::PASSWORD << "\n";
+	file << "db_name=" << Constants::Database::NAME << "\n";
+	file << "db_port=" << Constants::Database::PORT << "\n";
 
 	file.close();
 
